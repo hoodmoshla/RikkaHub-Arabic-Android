@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.json.Json
 import me.rerere.common.http.await
 import me.rerere.rikkahub.AppScope
@@ -21,7 +22,7 @@ import me.rerere.rikkahub.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
-private const val API_URL = "https://updates.rikka-ai.com/"
+private const val API_URL = "https://api.github.com/repos/hoodmoshla/RikkaHub-Arabic-Android/releases/latest"
 
 class UpdateChecker(
     private val client: OkHttpClient,
@@ -46,12 +47,19 @@ class UpdateChecker(
                             .get()
                             .addHeader(
                                 "User-Agent",
-                                "RikkaHub ${BuildConfig.VERSION_NAME} #${BuildConfig.VERSION_CODE}"
+                                "RikkaHub Arabic ${BuildConfig.VERSION_NAME} #${BuildConfig.VERSION_CODE}"
                             )
                             .build()
                     ).await()
                     if (response.isSuccessful) {
-                        json.decodeFromString<UpdateInfo>(response.body.string())
+                        val release = json.decodeFromString<GitHubRelease>(response.body.string())
+                        UpdateInfo(
+                            version = release.tagName.removePrefix("v"),
+                            publishedAt = release.publishedAt,
+                            changelog = release.body.orEmpty().ifBlank { release.name.orEmpty() },
+                            downloads = release.assets.filter { it.name.endsWith(".apk", ignoreCase = true) }
+                                .map { UpdateDownload(it.name, it.browserDownloadUrl, formatBytes(it.size)) },
+                        )
                     } else {
                         throw Exception("Failed to fetch update info")
                     }
@@ -104,6 +112,28 @@ data class UpdateInfo(
     val changelog: String,
     val downloads: List<UpdateDownload>
 )
+
+@Serializable
+private data class GitHubRelease(
+    @SerialName("tag_name") val tagName: String,
+    val name: String? = null,
+    val body: String? = null,
+    @SerialName("published_at") val publishedAt: String,
+    val assets: List<GitHubAsset> = emptyList(),
+)
+
+@Serializable
+private data class GitHubAsset(
+    val name: String,
+    val size: Long,
+    @SerialName("browser_download_url") val browserDownloadUrl: String,
+)
+
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1024 * 1024 -> "%.1f MB".format(bytes / 1024.0 / 1024.0)
+    bytes >= 1024 -> "%.1f KB".format(bytes / 1024.0)
+    else -> "$bytes B"
+}
 
 /**
  * 版本号值类，封装版本号字符串并提供比较功能

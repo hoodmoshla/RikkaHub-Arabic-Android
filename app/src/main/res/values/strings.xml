@@ -7,7 +7,7 @@
   <string name="about_page_version">Version</string>
   <string name="about_page_website">Website</string>
   <string name="add">Add</string>
-  <string name="app_name">RikkaHub</string>
+  <string name="app_name">RikkaHub Arabic</string>
   <string name="asr_button_content_description">Speech Recognition</string>
   <string name="asr_button_stop">Stop</string>
   <string name="assistant_detail_basic_desc">Configure name, avatar, model, and parameters</string>
@@ -413,9 +413,11 @@
   <string name="language_italian">🇮🇹 Italiano</string>
   <string name="language_japanese">🇯🇵 日本語</string>
   <string name="language_korean">🇰🇷 한국어</string>
+  <string name="language_russian">🇷🇺 Русский</string>
   <string name="language_simplified_chinese">🇨🇳 简体中文</string>
   <string name="language_spanish">🇪🇸 Español</string>
   <string name="language_traditional_chinese">🇨🇳 繁體中文</string>
+  <string name="language_arabic">🇸🇦 العربية</string>
   <string name="mcp_picker_syncing">Syncing MCP servers...</string>
   <string name="mcp_picker_title">MCP Servers</string>
   <string name="menu">Menu</string>
@@ -846,6 +848,9 @@
   <string name="setting_page_preferences_notification_desc">Update alerts, message generation notifications</string>
   <string name="setting_page_preferences_general">General</string>
   <string name="setting_page_preferences_general_desc">Interaction behavior, scrolling, input settings</string>
+  <string name="setting_language_title">App language</string>
+  <string name="setting_language_desc">Choose the language used by RikkaHub Arabic</string>
+  <string name="setting_language_system">System default</string>
   <string name="setting_page_preferences_ui">UI Preferences</string>
   <string name="setting_page_preferences_ui_desc">Message display, fonts, code blocks</string>
   <string name="setting_page_preferences_network">Network</string>

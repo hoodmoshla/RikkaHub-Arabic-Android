@@ -23,21 +23,28 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.width
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.DisplaySetting
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceBoolean
 import me.rerere.rikkahub.ui.theme.CustomColors
+import me.rerere.rikkahub.utils.AppLanguage
+import me.rerere.rikkahub.utils.AppLocale
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import kotlin.math.roundToInt
 
 @Composable
 fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
+    val context = LocalContext.current
+    val appLanguage = AppLocale.current(context)
     val settings by vm.settings.collectAsStateWithLifecycle()
     var displaySetting by remember(settings) { mutableStateOf(settings.displaySetting) }
     var ttsPlaybackSpeed by remember(settings.defaultTTSPlaybackSpeed) {
@@ -80,6 +87,33 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
                 ) {
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_language_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_language_desc)) },
+                        trailingContent = {
+                            Select(
+                                options = AppLanguage.entries,
+                                selectedOption = appLanguage,
+                                onOptionSelected = {
+                                    AppLocale.set(context, it)
+                                    (context as? android.app.Activity)?.recreate()
+                                },
+                                optionToString = { language ->
+                                    when (language) {
+                                        AppLanguage.SYSTEM -> stringResource(R.string.setting_language_system)
+                                        AppLanguage.ENGLISH -> stringResource(R.string.language_english)
+                                        AppLanguage.SIMPLIFIED_CHINESE -> stringResource(R.string.language_simplified_chinese)
+                                        AppLanguage.TRADITIONAL_CHINESE -> stringResource(R.string.language_traditional_chinese)
+                                        AppLanguage.JAPANESE -> stringResource(R.string.language_japanese)
+                                        AppLanguage.KOREAN -> stringResource(R.string.language_korean)
+                                        AppLanguage.RUSSIAN -> stringResource(R.string.language_russian)
+                                        AppLanguage.ARABIC -> stringResource(R.string.language_arabic)
+                                    }
+                                },
+                                modifier = Modifier.width(190.dp),
+                            )
+                        },
+                    )
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_create_new_conversation_on_start_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_display_page_create_new_conversation_on_start_desc)) },

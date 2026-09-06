@@ -19,11 +19,11 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "me.rerere.rikkahub"
+        applicationId = "me.rerere.rikkahub.arabic"
         minSdk = 26
         targetSdk = 37
-        versionCode = 183
-        versionName = "2.4.16"
+        versionCode = (project.findProperty("releaseCode") as String?)?.toIntOrNull() ?: 1
+        versionName = (project.findProperty("releaseVersion") as String?) ?: "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

@@ -121,7 +121,7 @@ fun SettingAboutPage() {
                         )
 
                         Text(
-                            text = "RikkaHub",
+                            text = stringResource(R.string.app_name),
                             style = MaterialTheme.typography.displaySmall,
                         )
                     }
@@ -163,9 +163,9 @@ fun SettingAboutPage() {
                             headlineContent = { Text(stringResource(R.string.about_page_website)) },
                         )
                         item(
-                            onClick = { context.openUrl("https://github.com/rikkahub/rikkahub") },
+                            onClick = { context.openUrl("https://github.com/hoodmoshla/RikkaHub-Arabic-Android") },
                             leadingContent = { Icon(HugeIcons.Github, null) },
-                            supportingContent = { Text("https://github.com/rikkahub/rikkahub") },
+                            supportingContent = { Text("https://github.com/hoodmoshla/RikkaHub-Arabic-Android") },
                             headlineContent = { Text(stringResource(R.string.about_page_github)) },
                         )
                         item(

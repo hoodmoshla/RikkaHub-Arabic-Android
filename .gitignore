@@ -11,3 +11,7 @@ local.properties
 .cursor
 .history
 .kotlin
+# Local Arabic translation and signing material
+app/src/main/res/values-ar/*.cache.json
+*.keystore
+arabic-release.keystore
