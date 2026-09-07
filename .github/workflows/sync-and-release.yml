@@ -57,6 +57,13 @@ jobs:
           if missing:
               raise SystemExit('Arabic translation missing keys:\n' + '\n'.join(missing))
           print(f'Arabic resource covers {len(base)} base strings')
+
+      - name: Validate Arabic integration hooks
+        run: |
+          test -f app/src/main/res/values-ar/strings.xml
+          grep -q 'AppLanguage.ARABIC' app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingPreferencesGeneralPage.kt
+          grep -q 'AppLocale.wrap' app/src/main/java/me/rerere/rikkahub/RouteActivity.kt
+          grep -q 'android:supportsRtl="true"' app/src/main/AndroidManifest.xml
           PY
 
       - name: Set up Java
@@ -67,6 +74,10 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Run unit tests
+        if: steps.changed.outputs.changed == 'true'
+        run: ./gradlew test --no-daemon
 
       - name: Restore signing key
         if: steps.changed.outputs.changed == 'true'
@@ -85,17 +96,9 @@ jobs:
           keyPassword=$KEY_PASSWORD
           EOF
 
-      - name: Restore Google Services configuration
-        if: steps.changed.outputs.changed == 'true'
-        env:
-          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
-        run: |
-          test -n "$GOOGLE_SERVICES_JSON" || (echo 'Missing GOOGLE_SERVICES_JSON repository secret; create a Firebase Android app for me.rerere.rikkahub.arabic and add the downloaded JSON as a secret.' >&2; exit 1)
-          printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
-
       - name: Build signed universal APK
         if: steps.changed.outputs.changed == 'true'
-        run: ./gradlew :app:assembleRelease -PreleaseVersion="$RELEASE_VERSION" -PreleaseCode="$RELEASE_CODE"
+        run: ./gradlew :app:assembleRelease -PreleaseVersion="$RELEASE_VERSION" -PreleaseCode="$RELEASE_CODE" -PreleaseSigned=true
 
       - name: Push validated upstream merge
         if: steps.changed.outputs.changed == 'true'
@@ -112,4 +115,4 @@ jobs:
 
       - name: Remove release-only files
         if: always()
-        run: rm -f app/google-services.json arabic-release.keystore local.properties
+        run: rm -f arabic-release.keystore local.properties
