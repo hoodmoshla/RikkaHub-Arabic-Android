@@ -101,12 +101,12 @@ jobs:
       - name: Restore signing key
         if: steps.changed.outputs.changed == 'true'
         env:
-          KEYSTORE_B64: ${{ secrets.ARABIC_RELEASE_KEYSTORE_B64 }}
-          STORE_PASSWORD: ${{ secrets.ARABIC_RELEASE_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ARABIC_RELEASE_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ARABIC_RELEASE_KEY_PASSWORD }}
+          KEYSTORE_B64: ${{ secrets.ARABIC_DEV_KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.ARABIC_DEV_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ARABIC_DEV_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ARABIC_DEV_KEY_PASSWORD }}
         run: |
-          test -n "$KEYSTORE_B64" || (echo 'Missing Arabic release signing secrets' >&2; exit 1)
+          test -n "$KEYSTORE_B64" || (echo 'Missing Arabic dev release signing secrets' >&2; exit 1)
           echo "$KEYSTORE_B64" | base64 --decode > arabic-release.keystore
           cat >> local.properties <<EOF
           storeFile=$GITHUB_WORKSPACE/arabic-release.keystore
@@ -114,6 +114,7 @@ jobs:
           keyAlias=$KEY_ALIAS
           keyPassword=$KEY_PASSWORD
           EOF
+          keytool -list -v -keystore arabic-release.keystore -storepass "$STORE_PASSWORD"
 
       - name: Build signed universal APK
         if: steps.changed.outputs.changed == 'true'

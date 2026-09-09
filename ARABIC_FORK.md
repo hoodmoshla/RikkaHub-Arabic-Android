@@ -1,6 +1,6 @@
 # RikkaHub Arabic
 
-RikkaHub Arabic is an independent Android distribution based on `rikkahub/rikkahub`. It uses the stable application ID `me.rerere.rikkahub.arabic`, so it can be installed beside the official RikkaHub application. The application ID must not be changed after the first public release.
+RikkaHub Arabic is an independent Android distribution based on `rikkahub/rikkahub`. It uses the stable application ID `me.rerere.rikkahub.arabic.dev`, so it can be installed side-by-side beside the original build and official RikkaHub application without conflict. The application ID serves as the permanent baseline for all future development.
 
 ## Language architecture
 
@@ -16,7 +16,7 @@ The recursive submodule checkout is required. The earlier `surfaceContainerLowes
 
 The Arabic distribution intentionally removes Firebase Analytics, Firebase Crashlytics, the Google Services plugin, and their runtime dependencies. The official project used Firebase only for telemetry events (`ai_send_message`, `ai_edit_message`, `ai_regenerate_at_message`, `ai_tool_approval`, and `ai_tool_answer`) and crash reporting; none of those services are required by chat, model providers, tools, storage, settings, language selection, RTL, or updates. Release builds therefore do not require a Firebase project or `google-services.json`.
 
-Before the first manual release, add these four encrypted repository secrets under **Settings → Secrets and variables → Actions**: `ARABIC_RELEASE_KEYSTORE_B64`, `ARABIC_RELEASE_STORE_PASSWORD`, `ARABIC_RELEASE_KEY_ALIAS`, and `ARABIC_RELEASE_KEY_PASSWORD`. The workflow intentionally fails with an explicit missing-signing-secret message rather than printing or exposing secret values.
+Before the first manual release, add these four encrypted repository secrets under **Settings → Secrets and variables → Actions**: `ARABIC_DEV_KEYSTORE_B64`, `ARABIC_DEV_STORE_PASSWORD`, `ARABIC_DEV_KEY_ALIAS`, and `ARABIC_DEV_KEY_PASSWORD`. The workflow intentionally fails with an explicit missing-signing-secret message rather than printing or exposing secret values.
 
 The application update checker reads the latest release from this repository's GitHub Releases API. APK assets are offered through the existing update card and downloaded with Android DownloadManager. On completion, the platform package installer is opened; Android's unknown-source permission remains under the user's control.
 
@@ -24,12 +24,12 @@ The application update checker reads the latest release from this repository's G
 
 Release signing uses four repository secrets, which must be configured before the first release:
 
-- `ARABIC_RELEASE_KEYSTORE_B64`
-- `ARABIC_RELEASE_STORE_PASSWORD`
-- `ARABIC_RELEASE_KEY_ALIAS`
-- `ARABIC_RELEASE_KEY_PASSWORD`
+- `ARABIC_DEV_KEYSTORE_B64`
+- `ARABIC_DEV_STORE_PASSWORD`
+- `ARABIC_DEV_KEY_ALIAS`
+- `ARABIC_DEV_KEY_PASSWORD`
 
-The keystore itself is never committed. Losing this keystore prevents Android updates to already-installed RikkaHub Arabic versions, so maintain an offline encrypted backup in addition to GitHub's encrypted secrets.
+The keystore itself (`rikkahub-arabic-dev.keystore`, alias `rikkahub-arabic-dev`) is never committed. Losing this keystore prevents Android updates to already-installed RikkaHub Arabic versions, so maintain an offline encrypted backup in addition to GitHub's encrypted secrets.
 
 ## Upstream maintenance
 

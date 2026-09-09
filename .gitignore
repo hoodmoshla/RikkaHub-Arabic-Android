@@ -15,3 +15,7 @@ local.properties
 app/src/main/res/values-ar/*.cache.json
 *.keystore
 arabic-release.keystore
+rikkahub-arabic-dev.keystore
+*.jks
+*.key
+*.crt

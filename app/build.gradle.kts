@@ -17,7 +17,7 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "me.rerere.rikkahub.arabic"
+        applicationId = "me.rerere.rikkahub.arabic.dev"
         minSdk = 26
         targetSdk = 37
         versionCode = (project.findProperty("releaseCode") as String?)?.toIntOrNull() ?: 1
