@@ -19,3 +19,4 @@ rikkahub-arabic-dev.keystore
 *.jks
 *.key
 *.crt
+release_dev_apk/
