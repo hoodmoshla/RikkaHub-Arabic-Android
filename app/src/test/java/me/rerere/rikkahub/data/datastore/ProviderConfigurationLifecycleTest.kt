@@ -75,7 +75,7 @@ class ProviderConfigurationLifecycleTest {
             models = listOf(customModel)
         )
 
-        val providersList = listOf(customProvider)
+        val providersList: List<ProviderSetting> = listOf(customProvider)
 
         // Serialize to JSON (same mechanism as DataStore)
         val encoded = JsonInstant.encodeToString(providersList)
