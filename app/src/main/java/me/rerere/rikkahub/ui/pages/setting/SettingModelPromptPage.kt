@@ -27,6 +27,7 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.ui.components.ui.DirectionalArrowForward
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_COMPRESS_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_OCR_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
@@ -111,9 +112,7 @@ private fun PromptSettingItem(
             onClick = { showEditor = true },
             headlineContent = { Text(stringResource(R.string.setting_model_page_prompt)) },
             trailingContent = {
-                Icon(
-                    HugeIcons.ArrowRight01,
-                    contentDescription = null,
+                DirectionalArrowForward(
                     modifier = Modifier.size(16.dp),
                 )
             },

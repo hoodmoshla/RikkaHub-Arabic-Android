@@ -38,6 +38,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -270,6 +271,7 @@ private fun ChatPageContent(
     onClearAllErrors: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val toaster = LocalToaster.current
     val workspaceRepository: WorkspaceRepository = koinInject()
     var previewMode by rememberSaveable { mutableStateOf(false) }
@@ -365,7 +367,7 @@ private fun ChatPageContent(
                     },
                     onSendClick = {
                         if (currentChatModel == null) {
-                            toaster.show("请先选择模型", type = ToastType.Error)
+                            toaster.show(context.getString(R.string.chat_page_select_model_first), type = ToastType.Error)
                             return@ChatInput
                         }
                         if (inputState.isEditing()) {

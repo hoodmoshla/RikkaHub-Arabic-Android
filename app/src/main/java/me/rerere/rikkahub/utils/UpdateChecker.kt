@@ -19,6 +19,7 @@ import kotlinx.serialization.json.Json
 import me.rerere.common.http.await
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.BuildConfig
+import me.rerere.rikkahub.R
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -77,7 +78,7 @@ class UpdateChecker(
             val request = DownloadManager.Request(download.url.toUri()).apply {
                 // 设置下载时通知栏的标题和描述
                 setTitle(download.name)
-                setDescription("正在下载更新包...")
+                setDescription(context.getString(R.string.downloading_update_package))
                 // 下载完成后通知栏可见
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 // 允许在移动网络和WiFi下下载
@@ -92,7 +93,7 @@ class UpdateChecker(
             dm.enqueue(request)
             // 你可以保存返回的downloadId到本地，以便后续查询下载进度或状态
         }.onFailure {
-            Toast.makeText(context, "Failed to update", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.update_failed), Toast.LENGTH_SHORT).show()
             context.openUrl(download.url) // 跳转到下载页面
         }
     }

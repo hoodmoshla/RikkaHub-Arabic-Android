@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.ui.DirectionalArrowForward
 import me.rerere.rikkahub.ui.components.webview.WEB_VIEW_BASE_URL
 import me.rerere.rikkahub.ui.components.webview.WebView
 import me.rerere.rikkahub.ui.components.webview.WebViewContentCache
@@ -104,7 +105,7 @@ fun WebViewPage(url: String, contentId: String) {
                         onClick = { state.goForward() },
                         enabled = state.canGoForward
                     ) {
-                        Icon(HugeIcons.ArrowRight01, contentDescription = "Forward")
+                        DirectionalArrowForward(contentDescription = "Forward")
                     }
 
                     val urlHandler = LocalUriHandler.current

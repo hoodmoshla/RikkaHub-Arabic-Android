@@ -17,6 +17,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowLeft01
@@ -29,6 +31,7 @@ fun ChatMessageBranchSelector(
     modifier: Modifier = Modifier,
     onUpdate: (MessageNode) -> Unit,
 ) {
+    val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
@@ -38,7 +41,7 @@ fun ChatMessageBranchSelector(
             val actionColor = MaterialTheme.colorScheme.onSurfaceVariant
 
             Icon(
-                imageVector = HugeIcons.ArrowLeft01,
+                imageVector = if (isRtl) HugeIcons.ArrowRight01 else HugeIcons.ArrowLeft01,
                 contentDescription = "Prev",
                 modifier = Modifier
                     .clip(CircleShape)
@@ -68,7 +71,7 @@ fun ChatMessageBranchSelector(
             )
 
             Icon(
-                imageVector = HugeIcons.ArrowRight01,
+                imageVector = if (isRtl) HugeIcons.ArrowLeft01 else HugeIcons.ArrowRight01,
                 contentDescription = "Next",
                 modifier = Modifier
                     .clip(CircleShape)

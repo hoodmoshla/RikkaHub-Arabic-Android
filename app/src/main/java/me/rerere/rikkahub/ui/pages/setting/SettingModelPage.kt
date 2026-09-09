@@ -45,6 +45,7 @@ import me.rerere.rikkahub.ui.components.ai.ReasoningButton
 import me.rerere.rikkahub.ui.components.ai.rememberModelListState
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.DirectionalArrowForward
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
@@ -218,9 +219,7 @@ private fun ModelSettingItem(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        Icon(
-                            HugeIcons.ArrowRight01,
-                            contentDescription = null,
+                        DirectionalArrowForward(
                             modifier = Modifier.size(16.dp),
                         )
                     }

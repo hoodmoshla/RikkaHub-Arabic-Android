@@ -30,6 +30,7 @@ import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Codesandbox
 import me.rerere.hugeicons.stroke.Tick02
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.ui.components.ui.DirectionalArrowForward
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.ui.pages.extensions.workspace.toShellStatusLabel
@@ -95,9 +96,7 @@ internal fun WorkspaceSelectSheet(
                     Text(stringResource(R.string.workspace_manage))
                 },
                 trailingContent = {
-                    Icon(
-                        imageVector = HugeIcons.ArrowRight01,
-                        contentDescription = null,
+                    DirectionalArrowForward(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 },

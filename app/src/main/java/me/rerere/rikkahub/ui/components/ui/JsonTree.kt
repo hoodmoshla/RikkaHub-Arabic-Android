@@ -114,7 +114,7 @@ private fun JsonObjectNode(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                imageVector = if (expanded) HugeIcons.ArrowDown01 else HugeIcons.ArrowRight01,
+                imageVector = if (expanded) HugeIcons.ArrowDown01 else directionalArrowForwardVector(),
                 contentDescription = null,
                 modifier = Modifier
                     .padding(start = (depth * 16).dp)
@@ -177,7 +177,7 @@ private fun JsonArrayNode(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                imageVector = if (expanded) HugeIcons.ArrowDown01 else HugeIcons.ArrowRight01,
+                imageVector = if (expanded) HugeIcons.ArrowDown01 else directionalArrowForwardVector(),
                 contentDescription = null,
                 modifier = Modifier
                     .padding(start = (depth * 16).dp)

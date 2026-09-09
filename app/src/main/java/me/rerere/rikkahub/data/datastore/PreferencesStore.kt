@@ -24,6 +24,7 @@ import kotlinx.serialization.Transient
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
@@ -682,6 +683,10 @@ fun List<ProviderSetting>.findModelById(uuid: Uuid): Model? {
 
 fun Settings.getCurrentChatModel(): Model? {
     return findModelById(this.getCurrentAssistant().chatModelId ?: this.chatModelId)
+        ?: providers.firstNotNullOfOrNull { provider ->
+            provider.models.firstOrNull { it.type == ModelType.CHAT }
+                ?: provider.models.firstOrNull()
+        }
 }
 
 fun Settings.getCurrentAssistant(): Assistant {

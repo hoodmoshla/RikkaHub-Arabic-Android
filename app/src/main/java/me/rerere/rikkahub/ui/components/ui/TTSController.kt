@@ -111,7 +111,7 @@ fun TTSController() {
                     }
                 ) {
                     Icon(
-                        imageVector = if (expand) HugeIcons.ArrowLeft01 else HugeIcons.ArrowRight01,
+                        imageVector = if (expand) directionalArrowBackVector() else directionalArrowForwardVector(),
                         contentDescription = null,
                     )
                 }

@@ -1339,4 +1339,8 @@
   <string name="chat_generation_network_disconnected">انقطع اتصال الشبكة</string>
   <string name="search_page_scope_current_assistant">المساعد الحالي</string>
   <string name="search_page_scope_all_assistants">جميع المساعدين</string>
+  <string name="chat_page_select_model_first">يرجى اختيار نموذج أولاً</string>
+  <string name="downloading_update_package">جاري تنزيل حزمة التحديث…</string>
+  <string name="update_failed">فشل التحديث</string>
+  <string name="chat_page_stop_generation_before_delete">يرجى إيقاف التوليد قبل حذف الرسالة</string>
 </resources>

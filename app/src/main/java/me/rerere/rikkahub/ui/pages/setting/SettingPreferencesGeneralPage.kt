@@ -37,6 +37,7 @@ import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceBoolean
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.AppLanguage
 import me.rerere.rikkahub.utils.AppLocale
+import me.rerere.rikkahub.utils.getActivity
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import kotlin.math.roundToInt
@@ -44,7 +45,7 @@ import kotlin.math.roundToInt
 @Composable
 fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
     val context = LocalContext.current
-    val appLanguage = AppLocale.current(context)
+    var appLanguage by remember { mutableStateOf(AppLocale.current(context)) }
     val settings by vm.settings.collectAsStateWithLifecycle()
     var displaySetting by remember(settings) { mutableStateOf(settings.displaySetting) }
     var ttsPlaybackSpeed by remember(settings.defaultTTSPlaybackSpeed) {
@@ -95,8 +96,9 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                                 options = AppLanguage.entries,
                                 selectedOption = appLanguage,
                                 onOptionSelected = {
+                                    appLanguage = it
                                     AppLocale.set(context, it)
-                                    (context as? android.app.Activity)?.recreate()
+                                    context.getActivity()?.recreate()
                                 },
                                 optionToString = { language ->
                                     when (language) {

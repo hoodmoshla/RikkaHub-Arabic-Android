@@ -82,6 +82,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
+import me.rerere.rikkahub.ui.components.ui.DirectionalArrowForward
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.icons.HeartIcon
@@ -802,9 +803,7 @@ fun ModelModalityTag(model: Model) {
                     .padding(1.dp)
             )
         }
-        Icon(
-            imageVector = HugeIcons.ArrowRight01,
-            contentDescription = null,
+        DirectionalArrowForward(
             modifier = Modifier.size(LocalTextStyle.current.lineHeight.toDp())
         )
         model.outputModalities.fastForEach { modality ->

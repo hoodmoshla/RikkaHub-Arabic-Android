@@ -67,6 +67,8 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
+import me.rerere.rikkahub.ui.components.ui.DirectionalArrowForward
+import me.rerere.rikkahub.ui.components.ui.directionalArrowBackVector
 import me.rerere.rikkahub.ui.components.ui.ToggleSurface
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.pages.setting.SearchAbilityTagLine
@@ -273,9 +275,7 @@ private fun SearchPicker(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Icon(
-                            imageVector = HugeIcons.ArrowRight01,
-                            contentDescription = null,
+                        DirectionalArrowForward(
                             modifier = Modifier
                                 .padding(start = 4.dp)
                                 .size(16.dp)
@@ -405,7 +405,7 @@ private fun SearchProviderPicker(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             IconButton(onClick = onBack) {
-                Icon(HugeIcons.ArrowLeft01, contentDescription = null)
+                Icon(directionalArrowBackVector(), contentDescription = null)
             }
             Text(
                 text = stringResource(R.string.search_picker_select_provider),

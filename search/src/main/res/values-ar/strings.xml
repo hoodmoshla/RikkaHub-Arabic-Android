@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<resources>
+  <string name="bing_desc">يُرجى ملاحظة أن بحث Bing يعتمد على الزواحف، مما قد يجعله غير مستقر ولا يُوصى به.</string>
+  <string name="click_to_get_api_key">اضغط للحصول على مفتاح API</string>
+  <string name="searxng_desc_1">يجب تمكين دعم تنسيق json في settings.yml:</string>
+  <string name="searxng_desc_2">search:\n  formats:\n    - html\n    - json</string>
+  <string name="custom_js_desc">موفر بحث مخصص مدعوم بواسطة QuickJS. قم بتنفيذ دوال search(query, resultSize) واختياريًا scrape(urls). استخدم fetch(url, options?) لطلبات HTTP.</string>
+</resources>

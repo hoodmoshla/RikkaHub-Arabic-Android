@@ -51,6 +51,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.network.toProxyOrNull
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.DirectionalArrowForward
 import me.rerere.rikkahub.ui.components.ui.Switch
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -377,7 +378,7 @@ fun SettingPreferencesNetworkPage(vm: SettingVM = koinViewModel()) {
                             )
                         },
                         trailingContent = {
-                            Icon(HugeIcons.ArrowRight01, contentDescription = null)
+                            DirectionalArrowForward()
                         },
                     )
                     item(

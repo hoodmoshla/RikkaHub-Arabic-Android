@@ -25,12 +25,11 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.DirectionalArrowForward
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.hooks.rememberAmoledDarkMode
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -83,7 +82,7 @@ fun SettingPreferencesThemePage(vm: SettingVM = koinViewModel()) {
                         onClick = { navController.navigate(Screen.SettingTheme) },
                         headlineContent = { Text(stringResource(R.string.setting_page_theme_setting)) },
                         supportingContent = { Text(stringResource(R.string.setting_page_theme_setting_desc)) },
-                        trailingContent = { Icon(HugeIcons.ArrowRight01, contentDescription = null) },
+                        trailingContent = { DirectionalArrowForward() },
                     )
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_amoled_dark_mode_title)) },
