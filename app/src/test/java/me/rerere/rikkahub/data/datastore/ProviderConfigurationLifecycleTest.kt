@@ -67,6 +67,7 @@ class ProviderConfigurationLifecycleTest {
         )
 
         val updatedSettings = Settings(
+            chatModelId = testModel.id,
             providers = DEFAULT_PROVIDERS.map {
                 if (it.id == configuredGemini.id) configuredGemini else it
             }
