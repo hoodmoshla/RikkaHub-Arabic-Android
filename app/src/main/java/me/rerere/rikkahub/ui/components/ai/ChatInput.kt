@@ -142,11 +142,8 @@ fun ChatInput(
     val focusManager = LocalFocusManager.current
 
     val containerShape = MaterialTheme.shapes.largeIncreased
-    val activeChatModel = settings.getCurrentChatModel()
     val modelListState = rememberModelListState(
-        modelId = (assistant.chatModelId ?: settings.chatModelId)?.let { id ->
-            settings.findModelById(id)?.id
-        } ?: activeChatModel?.id,
+        modelId = assistant.chatModelId ?: settings.chatModelId,
         providers = settings.providers,
         type = ModelType.CHAT,
     )
