@@ -2,8 +2,14 @@ name: Sync upstream and release Arabic APK
 
 on:
   schedule:
-    - cron: '17 3 * * *'
+    - cron: '17 3,15 * * *'
   workflow_dispatch:
+    inputs:
+      sync_upstream:
+        description: 'Fetch and attempt to merge latest upstream master'
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -25,27 +31,60 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Configure upstream
-        if: github.event_name == 'schedule'
+      - name: Configure Git identity
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Configure upstream
+        run: |
           git remote add upstream https://github.com/rikkahub/rikkahub.git || true
-          git fetch upstream master
+          git fetch upstream master --tags
 
-      - name: Merge official upstream
-        if: github.event_name == 'schedule'
+      - name: Detect and merge official upstream
+        id: merge_step
         run: |
-          echo "before=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-          git merge upstream/master --no-edit
+          SHOULD_SYNC="${{ github.event_name == 'schedule' || github.event.inputs.sync_upstream == 'true' }}"
+          UPSTREAM_HEAD=$(git rev-parse upstream/master)
+          LOCAL_HEAD=$(git rev-parse HEAD)
+          MERGE_BASE=$(git merge-base upstream/master HEAD)
 
-      - name: Detect source changes
-        id: changed
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$before" != "$(git rev-parse HEAD)" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "Upstream HEAD: $UPSTREAM_HEAD"
+          echo "Local HEAD:    $LOCAL_HEAD"
+          echo "Merge Base:    $MERGE_BASE"
+
+          if [ "$SHOULD_SYNC" = "true" ] && [ "$UPSTREAM_HEAD" != "$MERGE_BASE" ]; then
+            echo "New upstream changes detected. Attempting merge..."
+            
+            # Attempt merge without committing immediately
+            if ! git merge upstream/master --no-commit --no-ff; then
+              echo "::error::Merge conflict encountered when merging upstream/master"
+              CONFLICT_FILES=$(git diff --name-only --diff-filter=U)
+              echo "Conflicted files:"
+              echo "$CONFLICT_FILES"
+
+              # Sensitive files that must NEVER be blindly overwritten or conflicted
+              SENSITIVE_PATTERNS="values-ar/|AppLocale\.kt|SettingPreferencesGeneralPage\.kt|DefaultProviders\.kt|app/build\.gradle\.kts|AndroidManifest\.xml|RouteActivity\.kt|UpdateChecker\.kt"
+              
+              SENSITIVE_CONFLICTS=$(echo "$CONFLICT_FILES" | grep -E "$SENSITIVE_PATTERNS" || true)
+              if [ -n "$SENSITIVE_CONFLICTS" ]; then
+                echo "::error::CRITICAL: Sensitive files in Arabic distribution have merge conflicts:"
+                echo "$SENSITIVE_CONFLICTS"
+                echo "Aborting merge to prevent breaking Arabic localization, RTL, Provider, or App configuration."
+                git merge --abort
+                exit 1
+              else
+                echo "::error::Non-sensitive merge conflicts detected. Aborting merge."
+                git merge --abort
+                exit 1
+              fi
+            else
+              git commit -m "chore(upstream): sync and merge upstream/master ($UPSTREAM_HEAD)"
+              echo "merged_upstream=true" >> "$GITHUB_OUTPUT"
+            fi
           else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No upstream merge needed or sync skipped."
+            echo "merged_upstream=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Validate Arabic resource completeness
@@ -62,12 +101,16 @@ jobs:
               raise SystemExit('Arabic translation missing keys:\n' + '\n'.join(missing))
           print(f'Arabic resource covers {len(base)} base strings')
 
-      - name: Validate Arabic integration hooks
+      - name: Validate Arabic integration hooks and Provider architecture
         run: |
           test -f app/src/main/res/values-ar/strings.xml
           grep -q 'AppLanguage.ARABIC' app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingPreferencesGeneralPage.kt
           grep -q 'AppLocale.wrap' app/src/main/java/me/rerere/rikkahub/RouteActivity.kt
           grep -q 'android:supportsRtl="true"' app/src/main/AndroidManifest.xml
+          grep -q 'applicationId = "me.rerere.rikkahub.arabic.dev"' app/build.gradle.kts
+          grep -q 'RIKKAHUB_PROVIDER_ID' app/src/main/java/me/rerere/rikkahub/data/datastore/DefaultProviders.kt
+          grep -q 'DEFAULT_AUTO_MODEL_ID' app/src/main/java/me/rerere/rikkahub/data/datastore/DefaultProviders.kt
+          echo "All critical Arabic integration hooks and provider configurations validated."
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -95,11 +138,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Run unit tests
-        if: steps.changed.outputs.changed == 'true'
         run: ./gradlew test --no-daemon
 
       - name: Restore signing key
-        if: steps.changed.outputs.changed == 'true'
         env:
           KEYSTORE_B64: ${{ secrets.ARABIC_DEV_KEYSTORE_B64 }}
           STORE_PASSWORD: ${{ secrets.ARABIC_DEV_STORE_PASSWORD }}
@@ -117,15 +158,66 @@ jobs:
           keytool -list -v -keystore arabic-release.keystore -storepass "$STORE_PASSWORD"
 
       - name: Build signed universal APK
-        if: steps.changed.outputs.changed == 'true'
         run: ./gradlew :app:assembleRelease -PreleaseVersion="$RELEASE_VERSION" -PreleaseCode="$RELEASE_CODE" -PreleaseSigned=true
 
+      - name: Verify generated APK integrity
+        run: |
+          python3 - <<'PY'
+          import zipfile, struct, hashlib, os, sys
+
+          apk_path = "app/build/outputs/apk/release/app-universal-release.apk"
+          if not os.path.exists(apk_path):
+              sys.exit(f"APK not found at {apk_path}")
+
+          print(f"Checking APK: {apk_path} ({os.path.getsize(apk_path):,} bytes)")
+
+          with open(apk_path, "rb") as f:
+              data = f.read()
+
+          idx = data.find(b"APK Sig Block 42")
+          if idx == -1:
+              sys.exit("Error: APK Signature Block not found!")
+
+          block_size = struct.unpack("<Q", data[idx-8:idx])[0]
+          block_start = idx + 8 - block_size
+          pos = block_start + 8
+
+          cert_sha256 = None
+          while pos < idx - 8:
+              pair_len = struct.unpack("<Q", data[pos:pos+8])[0]
+              pair_id = struct.unpack("<I", data[pos+8:pos+12])[0]
+              val = data[pos+12:pos+8+pair_len]
+              if pair_id == 0x7109871a: # v2 scheme
+                  signer_len = struct.unpack_from("<I", val, 4)[0]
+                  signer = val[8:8+signer_len]
+                  signed_data_len = struct.unpack_from("<I", signer, 0)[0]
+                  signed_data = signer[4:4+signed_data_len]
+                  sd_offset = 4 + struct.unpack_from("<I", signed_data, 0)[0]
+                  certs_len = struct.unpack_from("<I", signed_data, sd_offset)[0]
+                  cert_len = struct.unpack_from("<I", signed_data, sd_offset+4)[0]
+                  cert_der = signed_data[sd_offset+8:sd_offset+8+cert_len]
+                  raw_sha = hashlib.sha256(cert_der).hexdigest()
+                  cert_sha256 = ":".join(raw_sha[i:i+2].upper() for i in range(0, len(raw_sha), 2))
+              pos += 8 + pair_len
+
+          EXPECTED_SHA = "27:32:61:44:BD:EE:8E:EF:A9:CD:7A:39:E8:0C:3A:53:22:E8:33:24:19:B8:6D:4B:13:CF:EC:BB:E9:EB:7B:73"
+          print(f"Verified Cert SHA-256: {cert_sha256}")
+          if cert_sha256 != EXPECTED_SHA:
+              sys.exit(f"Error: Cert SHA mismatch! Got {cert_sha256}, expected {EXPECTED_SHA}")
+
+          with zipfile.ZipFile(apk_path) as z:
+              manifest = z.read("AndroidManifest.xml")
+              if "me.rerere.rikkahub.arabic.dev".encode("utf-16le") not in manifest:
+                  sys.exit("Error: Manifest does not contain applicationId me.rerere.rikkahub.arabic.dev")
+
+          print("All APK binary verifications passed successfully!")
+          PY
+
       - name: Push validated upstream merge
-        if: steps.changed.outputs.changed == 'true' && github.event_name == 'schedule'
+        if: steps.merge_step.outputs.merged_upstream == 'true'
         run: git push origin master
 
       - name: Upload APK artifact
-        if: steps.changed.outputs.changed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: RikkaHub-Arabic-Release-APK

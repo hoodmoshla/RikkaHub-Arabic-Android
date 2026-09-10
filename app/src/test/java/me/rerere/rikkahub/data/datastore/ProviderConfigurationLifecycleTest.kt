@@ -14,13 +14,40 @@ import kotlin.uuid.Uuid
 class ProviderConfigurationLifecycleTest {
 
     @Test
-    fun `initial state shows not configured because default providers have empty models`() {
+    fun `initial state includes official RikkaHub free provider with Auto model and configured state`() {
         val initialSettings = Settings(
             providers = DEFAULT_PROVIDERS
         )
 
-        // When fresh install, no models exist, so isNotConfigured must be true
-        assertTrue("Fresh install must report isNotConfigured() == true", initialSettings.isNotConfigured())
+        // RikkaHub provider must be present in DEFAULT_PROVIDERS
+        val rikkahub = initialSettings.providers.find { it.id == RIKKAHUB_PROVIDER_ID }
+        assertNotNull("RikkaHub provider must be in DEFAULT_PROVIDERS", rikkahub)
+        assertEquals("RikkaHub", rikkahub?.name)
+        assertTrue("RikkaHub must be builtIn", rikkahub?.builtIn == true)
+        assertTrue("RikkaHub must be enabled", rikkahub?.enabled == true)
+
+        // Auto model must be present with DEFAULT_AUTO_MODEL_ID
+        val autoModel = rikkahub?.models?.find { it.id == DEFAULT_AUTO_MODEL_ID }
+        assertNotNull("Auto model must be in RikkaHub models", autoModel)
+        assertEquals("auto", autoModel?.modelId)
+        assertEquals("Auto", autoModel?.displayName)
+
+        // On clean install with RikkaHub provider, isNotConfigured must be false because Auto model is available
+        assertFalse("Clean install with RikkaHub provider must report isNotConfigured() == false", initialSettings.isNotConfigured())
+
+        // Default chat model resolution must find Auto model
+        val resolvedChatModel = initialSettings.getCurrentChatModel()
+        assertNotNull("Default chat model must resolve to Auto model", resolvedChatModel)
+        assertEquals("auto", resolvedChatModel?.modelId)
+        assertEquals(RIKKAHUB_PROVIDER_ID, resolvedChatModel?.findProvider(initialSettings.providers)?.id)
+    }
+
+    @Test
+    fun `unconfigured state occurs only when all provider models are empty`() {
+        val emptySettings = Settings(
+            providers = DEFAULT_PROVIDERS.map { it.copyProvider(models = emptyList()) }
+        )
+        assertTrue("When all models are empty, isNotConfigured must be true", emptySettings.isNotConfigured())
     }
 
     @Test
