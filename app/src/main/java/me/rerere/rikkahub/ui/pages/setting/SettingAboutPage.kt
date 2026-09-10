@@ -133,7 +133,7 @@ fun SettingAboutPage() {
                     ) {
                         item(
                             modifier = Modifier.combinedClickable(
-                                onClick = {},
+                                onClick = { context.openUrl("https://github.com/hoodmoshla/RikkaHub-Arabic-Android/releases") },
                                 onLongClick = { navController.navigate(Screen.Debug) },
                             ),
                             leadingContent = { Icon(HugeIcons.Code, null) },

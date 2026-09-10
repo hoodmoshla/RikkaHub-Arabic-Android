@@ -2,7 +2,7 @@ name: Sync upstream and release Arabic APK
 
 on:
   schedule:
-    - cron: '17 3,15 * * *'
+    - cron: '0 */6 * * *'
   workflow_dispatch:
     inputs:
       sync_upstream:
@@ -10,6 +10,11 @@ on:
         required: false
         type: boolean
         default: true
+      force_build:
+        description: 'Force build and release even if no new upstream commits'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -21,9 +26,6 @@ concurrency:
 jobs:
   sync-build-release:
     runs-on: ubuntu-latest
-    env:
-      RELEASE_VERSION: 1.0.${{ github.run_number }}
-      RELEASE_CODE: ${{ github.run_number }}
     steps:
       - name: Checkout Arabic fork
         uses: actions/checkout@v4
@@ -41,10 +43,9 @@ jobs:
           git remote add upstream https://github.com/rikkahub/rikkahub.git || true
           git fetch upstream master --tags
 
-      - name: Detect and merge official upstream
-        id: merge_step
+      - name: Check upstream for updates
+        id: check_upstream
         run: |
-          SHOULD_SYNC="${{ github.event_name == 'schedule' || github.event.inputs.sync_upstream == 'true' }}"
           UPSTREAM_HEAD=$(git rev-parse upstream/master)
           LOCAL_HEAD=$(git rev-parse HEAD)
           MERGE_BASE=$(git merge-base upstream/master HEAD)
@@ -53,41 +54,77 @@ jobs:
           echo "Local HEAD:    $LOCAL_HEAD"
           echo "Merge Base:    $MERGE_BASE"
 
-          if [ "$SHOULD_SYNC" = "true" ] && [ "$UPSTREAM_HEAD" != "$MERGE_BASE" ]; then
-            echo "New upstream changes detected. Attempting merge..."
-            
-            # Attempt merge without committing immediately
-            if ! git merge upstream/master --no-commit --no-ff; then
-              echo "::error::Merge conflict encountered when merging upstream/master"
-              CONFLICT_FILES=$(git diff --name-only --diff-filter=U)
-              echo "Conflicted files:"
-              echo "$CONFLICT_FILES"
-
-              # Sensitive files that must NEVER be blindly overwritten or conflicted
-              SENSITIVE_PATTERNS="values-ar/|AppLocale\.kt|SettingPreferencesGeneralPage\.kt|DefaultProviders\.kt|app/build\.gradle\.kts|AndroidManifest\.xml|RouteActivity\.kt|UpdateChecker\.kt"
-              
-              SENSITIVE_CONFLICTS=$(echo "$CONFLICT_FILES" | grep -E "$SENSITIVE_PATTERNS" || true)
-              if [ -n "$SENSITIVE_CONFLICTS" ]; then
-                echo "::error::CRITICAL: Sensitive files in Arabic distribution have merge conflicts:"
-                echo "$SENSITIVE_CONFLICTS"
-                echo "Aborting merge to prevent breaking Arabic localization, RTL, Provider, or App configuration."
-                git merge --abort
-                exit 1
-              else
-                echo "::error::Non-sensitive merge conflicts detected. Aborting merge."
-                git merge --abort
-                exit 1
-              fi
-            else
-              git commit -m "chore(upstream): sync and merge upstream/master ($UPSTREAM_HEAD)"
-              echo "merged_upstream=true" >> "$GITHUB_OUTPUT"
-            fi
+          HAS_NEW_UPSTREAM="false"
+          if [ "$UPSTREAM_HEAD" != "$MERGE_BASE" ]; then
+            HAS_NEW_UPSTREAM="true"
+            echo "New upstream commits detected!"
           else
-            echo "No upstream merge needed or sync skipped."
-            echo "merged_upstream=false" >> "$GITHUB_OUTPUT"
+            echo "No new upstream commits."
           fi
 
+          FORCE_BUILD="${{ github.event.inputs.force_build == 'true' }}"
+          SHOULD_SYNC="${{ github.event_name == 'schedule' || github.event.inputs.sync_upstream == 'true' }}"
+
+          SHOULD_PROCEED="false"
+          if [ "$FORCE_BUILD" = "true" ]; then
+            SHOULD_PROCEED="true"
+            echo "Build explicitly forced via workflow_dispatch."
+          elif [ "$HAS_NEW_UPSTREAM" = "true" ] && [ "$SHOULD_SYNC" = "true" ]; then
+            SHOULD_PROCEED="true"
+            echo "Upstream updates detected; proceeding with sync and build."
+          else
+            echo "No new upstream changes and build not forced. Halting workflow cleanly without Merge, Build, or Release."
+          fi
+
+          echo "has_new_upstream=$HAS_NEW_UPSTREAM" >> "$GITHUB_OUTPUT"
+          echo "should_proceed=$SHOULD_PROCEED" >> "$GITHUB_OUTPUT"
+
+      - name: Detect and merge official upstream
+        id: merge_step
+        if: steps.check_upstream.outputs.should_proceed == 'true' && steps.check_upstream.outputs.has_new_upstream == 'true'
+        run: |
+          echo "Attempting merge with upstream/master..."
+          if ! git merge upstream/master --no-commit --no-ff; then
+            echo "::error::Merge conflict encountered when merging upstream/master"
+            CONFLICT_FILES=$(git diff --name-only --diff-filter=U)
+            echo "Conflicted files:"
+            echo "$CONFLICT_FILES"
+
+            # Sensitive files that must NEVER be blindly overwritten or conflicted
+            SENSITIVE_PATTERNS="values-ar/|AppLocale\.kt|SettingPreferencesGeneralPage\.kt|DefaultProviders\.kt|app/build\.gradle\.kts|AndroidManifest\.xml|RouteActivity\.kt|UpdateChecker\.kt|UpdateCard\.kt|UpdateDownloadReceiver\.kt"
+
+            SENSITIVE_CONFLICTS=$(echo "$CONFLICT_FILES" | grep -E "$SENSITIVE_PATTERNS" || true)
+            if [ -n "$SENSITIVE_CONFLICTS" ]; then
+              echo "::error::CRITICAL: Sensitive files in Arabic distribution have merge conflicts:"
+              echo "$SENSITIVE_CONFLICTS"
+              echo "Aborting merge to prevent breaking Arabic localization, RTL, Provider, or App configuration."
+              git merge --abort
+              exit 1
+            else
+              echo "::error::Non-sensitive merge conflicts detected. Aborting merge."
+              git merge --abort
+              exit 1
+            fi
+          else
+            git commit -m "chore(upstream): sync and merge upstream/master ($(git rev-parse --short upstream/master))"
+            echo "merged_upstream=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Determine Release Version
+        id: version_step
+        if: steps.check_upstream.outputs.should_proceed == 'true'
+        run: |
+          UPSTREAM_TAG=$(git describe --tags --match "[0-9]*" --abbrev=0 upstream/master 2>/dev/null || echo "2.5.1")
+          BASE_VERSION=$(echo "$UPSTREAM_TAG" | sed 's/^v//')
+          RUN_NUM="${{ github.run_number }}"
+          RELEASE_VERSION="${BASE_VERSION}.${RUN_NUM}"
+          RELEASE_CODE="${RUN_NUM}"
+          echo "release_version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "release_code=$RELEASE_CODE" >> "$GITHUB_OUTPUT"
+          echo "Resolved Release Version: $RELEASE_VERSION (code $RELEASE_CODE)"
+
       - name: Validate Arabic resource completeness
+        if: steps.check_upstream.outputs.should_proceed == 'true'
         run: |
           python3 - <<'PY'
           import re
@@ -100,8 +137,10 @@ jobs:
           if missing:
               raise SystemExit('Arabic translation missing keys:\n' + '\n'.join(missing))
           print(f'Arabic resource covers {len(base)} base strings')
+          PY
 
       - name: Validate Arabic integration hooks and Provider architecture
+        if: steps.check_upstream.outputs.should_proceed == 'true'
         run: |
           test -f app/src/main/res/values-ar/strings.xml
           grep -q 'AppLanguage.ARABIC' app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingPreferencesGeneralPage.kt
@@ -113,17 +152,20 @@ jobs:
           echo "All critical Arabic integration hooks and provider configurations validated."
 
       - name: Set up Java
+        if: steps.check_upstream.outputs.should_proceed == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up pnpm
+        if: steps.check_upstream.outputs.should_proceed == 'true'
         uses: pnpm/action-setup@v4
         with:
           version: 11
 
       - name: Set up Node
+        if: steps.check_upstream.outputs.should_proceed == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -131,16 +173,20 @@ jobs:
           cache-dependency-path: web-ui/pnpm-lock.yaml
 
       - name: Install web-ui dependencies
+        if: steps.check_upstream.outputs.should_proceed == 'true'
         working-directory: web-ui
         run: pnpm install --frozen-lockfile
 
       - name: Set up Gradle
+        if: steps.check_upstream.outputs.should_proceed == 'true'
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Run unit tests
+      - name: Run JVM unit tests
+        if: steps.check_upstream.outputs.should_proceed == 'true'
         run: ./gradlew test --no-daemon
 
       - name: Restore signing key
+        if: steps.check_upstream.outputs.should_proceed == 'true'
         env:
           KEYSTORE_B64: ${{ secrets.ARABIC_DEV_KEYSTORE_B64 }}
           STORE_PASSWORD: ${{ secrets.ARABIC_DEV_STORE_PASSWORD }}
@@ -158,9 +204,14 @@ jobs:
           keytool -list -v -keystore arabic-release.keystore -storepass "$STORE_PASSWORD"
 
       - name: Build signed universal APK
+        if: steps.check_upstream.outputs.should_proceed == 'true'
+        env:
+          RELEASE_VERSION: ${{ steps.version_step.outputs.release_version }}
+          RELEASE_CODE: ${{ steps.version_step.outputs.release_code }}
         run: ./gradlew :app:assembleRelease -PreleaseVersion="$RELEASE_VERSION" -PreleaseCode="$RELEASE_CODE" -PreleaseSigned=true
 
       - name: Verify generated APK integrity
+        if: steps.check_upstream.outputs.should_proceed == 'true'
         run: |
           python3 - <<'PY'
           import zipfile, struct, hashlib, os, sys
@@ -214,15 +265,46 @@ jobs:
           PY
 
       - name: Push validated upstream merge
-        if: steps.merge_step.outputs.merged_upstream == 'true'
+        if: steps.check_upstream.outputs.should_proceed == 'true' && steps.merge_step.outputs.merged_upstream == 'true'
         run: git push origin master
 
       - name: Upload APK artifact
+        if: steps.check_upstream.outputs.should_proceed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: RikkaHub-Arabic-Release-APK
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: steps.check_upstream.outputs.should_proceed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ steps.version_step.outputs.release_version }}
+        run: |
+          TAG_NAME="v${RELEASE_VERSION}"
+          RELEASE_TITLE="RikkaHub Arabic ${TAG_NAME}"
+          NOTES="### RikkaHub Arabic ${TAG_NAME}
+
+          تحديث رسمي لنسخة RikkaHub Arabic المستقلة.
+
+          - **Application ID:** \`me.rerere.rikkahub.arabic.dev\`
+          - **التوقيع الرقمي:** Keystore دائم (SHA-256: \`27:32:61:44:BD:EE:8E:EF:A9:CD:7A:39:E8:0C:3A:53:22:E8:33:24:19:B8:6D:4B:13:CF:EC:BB:E9:EB:7B:73\`)
+          - **التوافق:** تثبيت مباشر وتحديث فوق النسخة المثبتة حاليًا دون فقدان المحادثات أو الإعدادات.
+          - **المميزات:** دعم كامل للغة العربية والاتجاه من اليمين لليسار (RTL) واختيار لغة التطبيق.
+          "
+
+          echo "Publishing GitHub Release: $TAG_NAME"
+          gh release create "$TAG_NAME" \
+            --title "$RELEASE_TITLE" \
+            --notes "$NOTES" \
+            app/build/outputs/apk/release/app-universal-release.apk \
+            app/build/outputs/apk/release/app-arm64-v8a-release.apk \
+            app/build/outputs/apk/release/app-x86_64-release.apk || \
+          gh release upload "$TAG_NAME" \
+            app/build/outputs/apk/release/app-universal-release.apk \
+            app/build/outputs/apk/release/app-arm64-v8a-release.apk \
+            app/build/outputs/apk/release/app-x86_64-release.apk --clobber
 
       - name: Remove release-only files
         if: always()
