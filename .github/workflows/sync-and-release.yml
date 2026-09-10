@@ -77,11 +77,12 @@ jobs:
           fi
 
           echo "has_new_upstream=$HAS_NEW_UPSTREAM" >> "$GITHUB_OUTPUT"
+          echo "should_sync=$SHOULD_SYNC" >> "$GITHUB_OUTPUT"
           echo "should_proceed=$SHOULD_PROCEED" >> "$GITHUB_OUTPUT"
 
       - name: Detect and merge official upstream
         id: merge_step
-        if: steps.check_upstream.outputs.should_proceed == 'true' && steps.check_upstream.outputs.has_new_upstream == 'true'
+        if: steps.check_upstream.outputs.should_proceed == 'true' && steps.check_upstream.outputs.should_sync == 'true' && steps.check_upstream.outputs.has_new_upstream == 'true'
         run: |
           echo "Attempting merge with upstream/master..."
           if ! git merge upstream/master --no-commit --no-ff; then
