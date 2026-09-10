@@ -295,14 +295,16 @@ jobs:
           - **المميزات:** دعم كامل للغة العربية والاتجاه من اليمين لليسار (RTL) واختيار لغة التطبيق.
           "
 
-          echo "Publishing GitHub Release: $TAG_NAME"
+          echo "Publishing GitHub Release: $TAG_NAME to $GITHUB_REPOSITORY"
           gh release create "$TAG_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
             --title "$RELEASE_TITLE" \
             --notes "$NOTES" \
             app/build/outputs/apk/release/app-universal-release.apk \
             app/build/outputs/apk/release/app-arm64-v8a-release.apk \
             app/build/outputs/apk/release/app-x86_64-release.apk || \
           gh release upload "$TAG_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
             app/build/outputs/apk/release/app-universal-release.apk \
             app/build/outputs/apk/release/app-arm64-v8a-release.apk \
             app/build/outputs/apk/release/app-x86_64-release.apk --clobber
