@@ -683,7 +683,7 @@ fun List<ProviderSetting>.findModelById(uuid: Uuid): Model? {
 
 fun Settings.getCurrentChatModel(): Model? {
     return findModelById(this.getCurrentAssistant().chatModelId ?: this.chatModelId)
-        ?: providers.firstNotNullOfOrNull { provider ->
+        ?: providers.filter { it.enabled }.firstNotNullOfOrNull { provider ->
             provider.models.firstOrNull { it.type == ModelType.CHAT }
                 ?: provider.models.firstOrNull()
         }

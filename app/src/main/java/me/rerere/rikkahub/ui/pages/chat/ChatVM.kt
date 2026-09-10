@@ -159,7 +159,9 @@ class ChatVM(
                         } else {
                             it
                         }
-                    })
+                    },
+                    chatModelId = model.id,
+                )
             }
         }
     }
