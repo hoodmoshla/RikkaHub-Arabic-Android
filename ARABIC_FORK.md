@@ -31,6 +31,11 @@ Release signing uses four repository secrets, which must be configured before th
 
 The keystore itself (`rikkahub-arabic-dev.keystore`, alias `rikkahub-arabic-dev`) is never committed. Losing this keystore prevents Android updates to already-installed RikkaHub Arabic versions, so maintain an offline encrypted backup in addition to GitHub's encrypted secrets.
 
-## Upstream maintenance
+## Default AI Providers and Models
 
-When the official project changes its settings or resource architecture, the scheduled workflow intentionally fails if the merge conflicts or Arabic coverage is incomplete. New Arabic translations should be added to `values-ar/strings.xml` before rerunning the release workflow.
+RikkaHub Arabic includes the official built-in free provider **RikkaHub** enabled by default with its `Auto` chat model (`b7055fb4-39f9-4042-a88a-0d80ed76cf08`). Upon clean installation, `isNotConfigured()` evaluates to `false`, and the app immediately selects `Auto` without showing the unconfigured warning ("يرجى تكوين API والنموذج" / "يرجى اختيار نموذج أولاً"). Users can still navigate to Settings → Providers, add personal API keys (OpenAI, Anthropic, Google Gemini, Ollama, DeepSeek, etc.), fetch their available model lists, and switch active chat models at any time.
+
+## Upstream maintenance and Conflict Guard
+
+The release workflow (`sync-and-release.yml`) contains a strict Sensitive Merge Conflict Guard. If an upstream merge conflicts with Arabic localization (`values-ar/`), RTL/app locale switching (`AppLocale.kt`, `SettingPreferencesGeneralPage.kt`), default provider architecture (`DefaultProviders.kt`, `PreferencesStore.kt`), `app/build.gradle.kts` (which pins the `me.rerere.rikkahub.arabic.dev` package identity), or `UpdateChecker.kt`, the workflow immediately aborts the merge (`git merge --abort`), reports the conflicting files, and terminates without generating or publishing an invalid APK.
+
