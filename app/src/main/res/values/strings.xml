@@ -1341,4 +1341,6 @@
   <string name="downloading_update_package">Downloading update package…</string>
   <string name="update_failed">Failed to update</string>
   <string name="chat_page_stop_generation_before_delete">Please stop generation before deleting messages</string>
+  <string name="update_permission_required">Please allow installing apps from this source to complete the update</string>
+  <string name="update_package_ready_installing">Update package ready, opening installer…</string>
 </resources>

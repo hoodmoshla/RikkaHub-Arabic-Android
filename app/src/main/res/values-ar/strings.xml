@@ -1343,4 +1343,6 @@
   <string name="downloading_update_package">جاري تنزيل حزمة التحديث…</string>
   <string name="update_failed">فشل التحديث</string>
   <string name="chat_page_stop_generation_before_delete">يرجى إيقاف التوليد قبل حذف الرسالة</string>
+  <string name="update_permission_required">يرجى السماح بتثبيت التطبيقات من هذا المصدر لإتمام التحديث</string>
+  <string name="update_package_ready_installing">حزمة التحديث جاهزة، جاري فتح شاشة التثبيت…</string>
 </resources>

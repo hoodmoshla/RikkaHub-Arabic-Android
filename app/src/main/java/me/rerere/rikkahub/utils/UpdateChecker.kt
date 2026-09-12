@@ -2,9 +2,15 @@ package me.rerere.rikkahub.utils
 
 import android.app.DownloadManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Environment
+import android.provider.Settings
 import android.widget.Toast
+import androidx.core.content.FileProvider
 import androidx.core.net.toUri
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
@@ -75,26 +81,123 @@ class UpdateChecker(
 
     fun downloadUpdate(context: Context, download: UpdateDownload) {
         runCatching {
-            val request = DownloadManager.Request(download.url.toUri()).apply {
-                // 设置下载时通知栏的标题和描述
-                setTitle(download.name)
-                setDescription(context.getString(R.string.downloading_update_package))
-                // 下载完成后通知栏可见
-                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                // 允许在移动网络和WiFi下下载
-                setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI or DownloadManager.Request.NETWORK_MOBILE)
-                // 设置文件保存路径
-                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, download.name)
-                // 允许下载的文件类型
-                setMimeType("application/vnd.android.package-archive")
+            val downloadDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                ?: context.filesDir
+            val destinationFile = File(downloadDir, download.name)
+
+            // If an identical, valid APK is already fully downloaded on disk, install immediately!
+            if (UpdateInstaller.isApkValid(context, destinationFile)) {
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.update_package_ready_installing),
+                    Toast.LENGTH_SHORT
+                ).show()
+                UpdateInstaller.installApk(context, destinationFile)
+                return
             }
-            // 获取系统的DownloadManager
-            val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            dm.enqueue(request)
-            // 你可以保存返回的downloadId到本地，以便后续查询下载进度或状态
-        }.onFailure {
+
+            // Remove any stale, partial, or corrupted file to ensure a clean download
+            if (destinationFile.exists()) {
+                destinationFile.delete()
+            }
+
+            val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+                ?: throw IllegalStateException("DownloadManager service not available")
+
+            val request = DownloadManager.Request(download.url.toUri()).apply {
+                setTitle("RikkaHub Arabic - ${download.name}")
+                setDescription(context.getString(R.string.downloading_update_package))
+                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI or DownloadManager.Request.NETWORK_MOBILE)
+                setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, download.name)
+                setMimeType("application/vnd.android.package-archive")
+                addRequestHeader("User-Agent", "RikkaHub-Arabic/${BuildConfig.VERSION_NAME}")
+            }
+
+            val downloadId = dm.enqueue(request)
+
+            // Save download tracking info in SharedPreferences
+            context.getSharedPreferences("update_download_pref", Context.MODE_PRIVATE)
+                .edit()
+                .putLong("last_download_id", downloadId)
+                .putString("last_apk_name", download.name)
+                .putString("last_apk_path", destinationFile.absolutePath)
+                .apply()
+
+            Toast.makeText(
+                context,
+                context.getString(R.string.downloading_update_package),
+                Toast.LENGTH_SHORT
+            ).show()
+        }.onFailure { e ->
+            Toast.makeText(
+                context,
+                "${context.getString(R.string.update_failed)}: ${e.localizedMessage ?: "Unknown error"}",
+                Toast.LENGTH_LONG
+            ).show()
+            context.openUrl(download.url)
+        }
+    }
+}
+
+object UpdateInstaller {
+    /**
+     * Checks if the file exists and is a valid, complete APK matching this application's package name.
+     */
+    fun isApkValid(context: Context, file: File): Boolean {
+        if (!file.exists() || file.length() <= 0L) return false
+        val pkgInfo = context.packageManager.getPackageArchiveInfo(file.absolutePath, 0) ?: return false
+        return pkgInfo.packageName == context.packageName
+    }
+
+    /**
+     * Installs the downloaded APK via standard, official Android system Package Installer UI.
+     * Respects Android security confirmations and does not attempt silent installation.
+     */
+    fun installApk(context: Context, apkFile: File) {
+        if (!apkFile.exists() || apkFile.length() <= 0L) {
             Toast.makeText(context, context.getString(R.string.update_failed), Toast.LENGTH_SHORT).show()
-            context.openUrl(download.url) // 跳转到下载页面
+            return
+        }
+
+        val contentUri: Uri = try {
+            FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                apkFile
+            )
+        } catch (e: Exception) {
+            Toast.makeText(context, "${context.getString(R.string.update_failed)}: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        // On Android 8.0+ (Oreo), verify unknown app install permission first
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            !context.packageManager.canRequestPackageInstalls()
+        ) {
+            Toast.makeText(
+                context,
+                context.getString(R.string.update_permission_required),
+                Toast.LENGTH_LONG
+            ).show()
+            val manageIntent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                data = Uri.parse("package:${context.packageName}")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(manageIntent)
+            return
+        }
+
+        val installIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(contentUri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        try {
+            context.startActivity(installIntent)
+        } catch (e: Exception) {
+            Toast.makeText(context, "${context.getString(R.string.update_failed)}: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
         }
     }
 }
