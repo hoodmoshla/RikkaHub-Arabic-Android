@@ -37,7 +37,8 @@ android {
             val isBuildingBundle = gradle.startParameter.taskNames.any { it.lowercase().contains("bundle") }
             isEnable = !isBuildingBundle
             reset()
-            include("arm64-v8a", "x86_64")
+            // Only the universal APK is produced (no per-ABI split APKs), so the release
+            // publishes exactly one artifact: app-universal-release.apk.
             isUniversalApk = true
         }
     }
@@ -116,6 +117,16 @@ android {
         compilerOptions.optIn.add("kotlin.time.ExperimentalTime")
         compilerOptions.optIn.add("kotlinx.coroutines.ExperimentalCoroutinesApi")
         compilerOptions.optIn.add("androidx.navigation3.runtime.ExperimentalNavigation3Api")
+    }
+}
+
+// One APK per variant is built (no per-ABI split APKs). Keep the historical
+// "app-universal-<variant>.apk" artifact name that the release workflow publishes.
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            output.outputFileName.set("app-universal-${variant.name}.apk")
+        }
     }
 }
 
