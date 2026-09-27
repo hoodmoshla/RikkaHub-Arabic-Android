@@ -1,6 +1,14 @@
 name: Sync upstream and release Arabic APK
 
 on:
+  # Every suitable update pushed to master (code, resources, workflow, ...) is built and
+  # released automatically. Documentation-only pushes are ignored on purpose.
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   schedule:
     - cron: '0 */6 * * *'
   workflow_dispatch:
@@ -18,6 +26,11 @@ on:
 
 permissions:
   contents: write
+
+env:
+  # Releases are always published to the Arabic distribution repository so that the in-app
+  # UpdateChecker (which reads hoodmoshla/RikkaHub-Arabic-Android/releases/latest) finds them.
+  TARGET_REPO: hoodmoshla/RikkaHub-Arabic-Android
 
 concurrency:
   group: arabic-upstream-release
@@ -63,12 +76,18 @@ jobs:
           fi
 
           FORCE_BUILD="${{ github.event.inputs.force_build == 'true' }}"
+          IS_PUSH="${{ github.event_name == 'push' }}"
+          # Upstream is merged only for scheduled/manual runs; a push to master builds exactly
+          # what was pushed (predictable releases) instead of pulling upstream changes in.
           SHOULD_SYNC="${{ github.event_name == 'schedule' || github.event.inputs.sync_upstream == 'true' }}"
 
           SHOULD_PROCEED="false"
           if [ "$FORCE_BUILD" = "true" ]; then
             SHOULD_PROCEED="true"
             echo "Build explicitly forced via workflow_dispatch."
+          elif [ "$IS_PUSH" = "true" ]; then
+            SHOULD_PROCEED="true"
+            echo "Push to master detected; building and releasing the updated Arabic code."
           elif [ "$HAS_NEW_UPSTREAM" = "true" ] && [ "$SHOULD_SYNC" = "true" ]; then
             SHOULD_PROCEED="true"
             echo "Upstream updates detected; proceeding with sync and build."
@@ -295,16 +314,16 @@ jobs:
           - **المميزات:** دعم كامل للغة العربية والاتجاه من اليمين لليسار (RTL) واختيار لغة التطبيق.
           "
 
-          echo "Publishing GitHub Release: $TAG_NAME to $GITHUB_REPOSITORY"
+          echo "Publishing GitHub Release: $TAG_NAME to $TARGET_REPO"
           gh release create "$TAG_NAME" \
-            --repo "$GITHUB_REPOSITORY" \
+            --repo "$TARGET_REPO" \
             --title "$RELEASE_TITLE" \
             --notes "$NOTES" \
             app/build/outputs/apk/release/app-universal-release.apk \
             app/build/outputs/apk/release/app-arm64-v8a-release.apk \
             app/build/outputs/apk/release/app-x86_64-release.apk || \
           gh release upload "$TAG_NAME" \
-            --repo "$GITHUB_REPOSITORY" \
+            --repo "$TARGET_REPO" \
             app/build/outputs/apk/release/app-universal-release.apk \
             app/build/outputs/apk/release/app-arm64-v8a-release.apk \
             app/build/outputs/apk/release/app-x86_64-release.apk --clobber

@@ -3,6 +3,7 @@ package me.rerere.rikkahub.utils
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInfo
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -56,6 +57,7 @@ class UpdateChecker(
                                 "User-Agent",
                                 "RikkaHub Arabic ${BuildConfig.VERSION_NAME} #${BuildConfig.VERSION_CODE}"
                             )
+                            .addHeader("Accept", "application/vnd.github+json")
                             .build()
                     ).await()
                     if (response.isSuccessful) {
@@ -64,7 +66,14 @@ class UpdateChecker(
                             version = release.tagName.removePrefix("v"),
                             publishedAt = release.publishedAt,
                             changelog = release.body.orEmpty().ifBlank { release.name.orEmpty() },
-                            downloads = release.assets.filter { it.name.endsWith(".apk", ignoreCase = true) }
+                            downloads = release.assets
+                                .filter { it.name.endsWith(".apk", ignoreCase = true) }
+                                .sortedWith(
+                                    compareBy(
+                                        { apkAssetPriority(it.name) },
+                                        { it.name.lowercase() },
+                                    )
+                                )
                                 .map { UpdateDownload(it.name, it.browserDownloadUrl, formatBytes(it.size)) },
                         )
                     } else {
@@ -85,8 +94,11 @@ class UpdateChecker(
                 ?: context.filesDir
             val destinationFile = File(downloadDir, download.name)
 
-            // If an identical, valid APK is already fully downloaded on disk, install immediately!
-            if (UpdateInstaller.isApkValid(context, destinationFile)) {
+            // If a *newer* valid APK is already fully downloaded on disk, install immediately!
+            // Only a strictly newer build counts: the GitHub asset names are stable across
+            // releases, so a leftover file from a previous version must never short-circuit
+            // the download of the current release.
+            if (UpdateInstaller.isInstallableUpdate(context, destinationFile)) {
                 Toast.makeText(
                     context,
                     context.getString(R.string.update_package_ready_installing),
@@ -145,9 +157,46 @@ object UpdateInstaller {
      * Checks if the file exists and is a valid, complete APK matching this application's package name.
      */
     fun isApkValid(context: Context, file: File): Boolean {
-        if (!file.exists() || file.length() <= 0L) return false
-        val pkgInfo = context.packageManager.getPackageArchiveInfo(file.absolutePath, 0) ?: return false
-        return pkgInfo.packageName == context.packageName
+        return readPackageInfo(context, file)?.packageName == context.packageName
+    }
+
+    /**
+     * True when [file] is a complete APK of this application **and** its version code is
+     * strictly higher than the currently installed one.
+     *
+     * GitHub release asset names are stable across releases (`app-universal-release.apk`,
+     * `app-arm64-v8a-release.apk`, ...), so a file cached from a previous update attempt would
+     * otherwise be considered "valid" and get installed again, preventing every future update.
+     * Requiring a strictly newer version code guarantees the freshest release is always used.
+     */
+    fun isInstallableUpdate(context: Context, file: File): Boolean {
+        val info = readPackageInfo(context, file) ?: return false
+        if (info.packageName != context.packageName) return false
+        return isNewerVersionCode(versionCodeOf(info), installedVersionCode(context))
+    }
+
+    /**
+     * Reads the manifest of an APK file without installing it. Returns `null` when the file is
+     * missing, empty or not a readable APK archive.
+     */
+    private fun readPackageInfo(context: Context, file: File): PackageInfo? {
+        if (!file.exists() || file.length() <= 0L) return null
+        return runCatching {
+            context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
+        }.getOrNull()
+    }
+
+    private fun installedVersionCode(context: Context): Long = runCatching {
+        versionCodeOf(context.packageManager.getPackageInfo(context.packageName, 0))
+    }.getOrDefault(0L)
+
+    @Suppress("DEPRECATION")
+    private fun versionCodeOf(info: PackageInfo): Long {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.longVersionCode
+        } else {
+            info.versionCode.toLong()
+        }
     }
 
     /**
@@ -237,6 +286,34 @@ private fun formatBytes(bytes: Long): String = when {
     bytes >= 1024 * 1024 -> "%.1f MB".format(bytes / 1024.0 / 1024.0)
     bytes >= 1024 -> "%.1f KB".format(bytes / 1024.0)
     else -> "$bytes B"
+}
+
+/**
+ * A downloaded/cached package is only installable when its version code is strictly greater than
+ * the currently installed one. Because release asset names are shared between versions, a file
+ * left on disk from a previous release must never be treated as the current update.
+ */
+internal fun isNewerVersionCode(remoteVersionCode: Long, installedVersionCode: Long): Boolean {
+    return remoteVersionCode > installedVersionCode
+}
+
+/**
+ * Ranks APK release assets so that the most broadly compatible one is offered first:
+ * universal > arm64-v8a > armeabi-v7a/arm > x86_64 > x86 > anything else.
+ *
+ * The Arabic release publishes `app-universal-release.apk`, `app-arm64-v8a-release.apk` and
+ * `app-x86_64-release.apk`; the universal build is the safe default on every device.
+ */
+internal fun apkAssetPriority(name: String): Int {
+    val normalized = name.lowercase()
+    return when {
+        normalized.contains("universal") -> 0
+        normalized.contains("arm64") || normalized.contains("aarch64") -> 1
+        normalized.contains("armeabi") || normalized.contains("armv7") -> 2
+        normalized.contains("x86_64") || normalized.contains("x64") -> 3
+        normalized.contains("x86") -> 4
+        else -> 5
+    }
 }
 
 /**

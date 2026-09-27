@@ -38,7 +38,7 @@ class UpdateDownloadReceiver : BroadcastReceiver() {
 
             if (status == DownloadManager.STATUS_SUCCESSFUL) {
                 val apkFile = resolveDownloadedApk(context, it, downloadId)
-                if (apkFile != null && UpdateInstaller.isApkValid(context, apkFile)) {
+                if (apkFile != null && UpdateInstaller.isInstallableUpdate(context, apkFile)) {
                     UpdateInstaller.installApk(context, apkFile)
                 } else {
                     Toast.makeText(
@@ -64,7 +64,7 @@ class UpdateDownloadReceiver : BroadcastReceiver() {
         val lastPath = pref.getString("last_apk_path", null)
         if (lastPath != null) {
             val file = File(lastPath)
-            if (UpdateInstaller.isApkValid(context, file)) {
+            if (UpdateInstaller.isInstallableUpdate(context, file)) {
                 UpdateInstaller.installApk(context, file)
                 return
             }
@@ -118,7 +118,7 @@ class UpdateDownloadReceiver : BroadcastReceiver() {
         // 4. Scan downloadDir for any valid APK if recordedName not found
         if (downloadDir != null && downloadDir.isDirectory) {
             val apks = downloadDir.listFiles { f -> f.extension.equals("apk", ignoreCase = true) }
-            val valid = apks?.firstOrNull { UpdateInstaller.isApkValid(context, it) }
+            val valid = apks?.firstOrNull { UpdateInstaller.isInstallableUpdate(context, it) }
             if (valid != null) return valid
         }
 
