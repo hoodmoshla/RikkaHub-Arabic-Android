@@ -68,7 +68,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import me.rerere.rikkahub.data.datastore.resolveChatModel
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.model.Assistant
@@ -89,6 +89,7 @@ import kotlin.uuid.Uuid
 internal fun FilesPicker(
     conversation: Conversation,
     assistant: Assistant,
+    workspaceId: Uuid?,
     state: ChatInputState,
     mcpManager: McpManager,
     onCompressContext: (additionalPrompt: String, targetTokens: Int, keepRecentMessages: Int) -> Job,
@@ -106,7 +107,7 @@ internal fun FilesPicker(
     onPickFile: () -> Unit,
 ) {
     val settings = LocalSettings.current
-    val provider = settings.getCurrentChatModel()?.findProvider(providers = settings.providers)
+    val provider = settings.resolveChatModel(conversation)?.findProvider(providers = settings.providers)
     val navController = LocalNavController.current
     val workspaceRepository: WorkspaceRepository = koinInject()
     val workspaces by workspaceRepository.listFlow().collectAsState(initial = emptyList())
@@ -140,10 +141,9 @@ internal fun FilesPicker(
 
         if (workspaces.isNotEmpty()) {
             WorkspacePickerListItem(
-                assistant = assistant,
+                workspaceId = workspaceId,
                 conversation = conversation,
                 workspaces = workspaces,
-                onUpdateAssistant = onUpdateAssistant,
                 onUpdateConversation = onUpdateConversation,
                 onNavigateToDetail = { id ->
                     onDismiss()
@@ -240,8 +240,8 @@ internal fun FilesPicker(
         )
 
         // Workspace CWD
-        val boundWorkspace = remember(workspaces, assistant.workspaceId) {
-            workspaces.find { it.id == assistant.workspaceId?.toString() }
+        val boundWorkspace = remember(workspaces, workspaceId) {
+            workspaces.find { it.id == workspaceId?.toString() }
         }
         if (boundWorkspace != null && boundWorkspace.shellStatus == WorkspaceShellStatus.READY.name) {
             var showCwdSheet by remember { mutableStateOf(false) }
@@ -301,18 +301,17 @@ internal fun FilesPicker(
 
 @Composable
 private fun WorkspacePickerListItem(
-    assistant: Assistant,
+    workspaceId: Uuid?,
     conversation: Conversation,
     workspaces: List<WorkspaceEntity>,
-    onUpdateAssistant: (Assistant) -> Unit,
     onUpdateConversation: (Conversation) -> Unit,
     onNavigateToDetail: (String) -> Unit,
     onNavigateToTerminal: (String) -> Unit,
     onNavigateToManage: () -> Unit,
 ) {
     var showSheet by remember { mutableStateOf(false) }
-    val boundWorkspace = remember(workspaces, assistant.workspaceId) {
-        workspaces.find { it.id == assistant.workspaceId?.toString() }
+    val boundWorkspace = remember(workspaces, workspaceId) {
+        workspaces.find { it.id == workspaceId?.toString() }
     }
 
     ListItem(
@@ -364,15 +363,18 @@ private fun WorkspacePickerListItem(
 
     if (showSheet) {
         WorkspaceSelectSheet(
-            assistant = assistant,
+            selectedWorkspaceId = workspaceId,
             workspaces = workspaces,
-            onSelect = { workspaceId ->
-                val newId = workspaceId?.let { Uuid.parse(it) }
-                if (newId != assistant.workspaceId) {
-                    onUpdateAssistant(assistant.copy(workspaceId = newId))
-                    if (conversation.workspaceCwd != null) {
-                        onUpdateConversation(conversation.copy(workspaceCwd = null))
-                    }
+            onSelect = { selected ->
+                val newId = selected?.let { Uuid.parse(it) }
+                // 会话级覆盖: 只修改当前会话绑定的项目, 不影响助手或其它会话
+                if (newId != workspaceId) {
+                    onUpdateConversation(
+                        conversation.copy(
+                            workspaceId = newId,
+                            workspaceCwd = null,
+                        )
+                    )
                 }
                 showSheet = false
             },

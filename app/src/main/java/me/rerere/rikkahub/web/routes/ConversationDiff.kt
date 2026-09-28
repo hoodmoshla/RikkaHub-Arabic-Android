@@ -20,6 +20,8 @@ internal fun ConversationDto.singleNodeDiffOrNull(current: ConversationDto): Nod
         customSystemPrompt != current.customSystemPrompt ||
         modeInjectionIds != current.modeInjectionIds ||
         lorebookIds != current.lorebookIds ||
+        modelId != current.modelId ||
+        workspaceId != current.workspaceId ||
         workspaceCwd != current.workspaceCwd ||
         folderId != current.folderId
     ) {

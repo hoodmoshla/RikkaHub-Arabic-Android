@@ -37,6 +37,50 @@ class ConversationRepository(
     companion object {
         private const val PAGE_SIZE = 20
         private const val INITIAL_LOAD_SIZE = 40
+
+        internal fun conversationToConversationEntity(conversation: Conversation): ConversationEntity {
+            require(conversation.messageNodes.none { it.messages.any { message -> message.hasBase64Part() } })
+            return ConversationEntity(
+                id = conversation.id.toString(),
+                title = conversation.title,
+                nodes = "[]",  // nodes 现在存储在单独的表中
+                createAt = conversation.createAt.toEpochMilli(),
+                updateAt = conversation.updateAt.toEpochMilli(),
+                assistantId = conversation.assistantId.toString(),
+                chatSuggestions = JsonInstant.encodeToString(conversation.chatSuggestions),
+                isPinned = conversation.isPinned,
+                customSystemPrompt = conversation.customSystemPrompt ?: "",
+                modeInjectionIds = JsonInstant.encodeToString(conversation.modeInjectionIds),
+                lorebookIds = JsonInstant.encodeToString(conversation.lorebookIds),
+                workspaceCwd = conversation.workspaceCwd ?: "",
+                modelId = conversation.modelId?.toString() ?: "",
+                workspaceId = conversation.workspaceId?.toString() ?: "",
+                folderId = conversation.folderId?.toString() ?: "",
+            )
+        }
+
+        internal fun conversationEntityToConversation(
+            conversationEntity: ConversationEntity,
+            messageNodes: List<MessageNode>
+        ): Conversation {
+            return Conversation(
+                id = Uuid.parse(conversationEntity.id),
+                title = conversationEntity.title,
+                messageNodes = messageNodes.filter { it.messages.isNotEmpty() },
+                createAt = Instant.ofEpochMilli(conversationEntity.createAt),
+                updateAt = Instant.ofEpochMilli(conversationEntity.updateAt),
+                assistantId = Uuid.parse(conversationEntity.assistantId),
+                chatSuggestions = JsonInstant.decodeFromString(conversationEntity.chatSuggestions),
+                isPinned = conversationEntity.isPinned,
+                customSystemPrompt = conversationEntity.customSystemPrompt.ifEmpty { null },
+                modeInjectionIds = JsonInstant.decodeFromString(conversationEntity.modeInjectionIds),
+                lorebookIds = JsonInstant.decodeFromString(conversationEntity.lorebookIds),
+                workspaceCwd = conversationEntity.workspaceCwd.ifEmpty { null },
+                modelId = conversationEntity.modelId.ifEmpty { null }?.let { Uuid.parse(it) },
+                workspaceId = conversationEntity.workspaceId.ifEmpty { null }?.let { Uuid.parse(it) },
+                folderId = conversationEntity.folderId.ifEmpty { null }?.let { Uuid.parse(it) },
+            )
+        }
     }
 
     suspend fun getRecentConversations(assistantId: Uuid, limit: Int = 10): List<Conversation> {
@@ -345,46 +389,6 @@ class ConversationRepository(
         getConversationsOfAssistant(assistantId).first().forEach { conversation ->
             deleteConversation(conversation)
         }
-    }
-
-    fun conversationToConversationEntity(conversation: Conversation): ConversationEntity {
-        require(conversation.messageNodes.none { it.messages.any { message -> message.hasBase64Part() } })
-        return ConversationEntity(
-            id = conversation.id.toString(),
-            title = conversation.title,
-            nodes = "[]",  // nodes 现在存储在单独的表中
-            createAt = conversation.createAt.toEpochMilli(),
-            updateAt = conversation.updateAt.toEpochMilli(),
-            assistantId = conversation.assistantId.toString(),
-            chatSuggestions = JsonInstant.encodeToString(conversation.chatSuggestions),
-            isPinned = conversation.isPinned,
-            customSystemPrompt = conversation.customSystemPrompt ?: "",
-            modeInjectionIds = JsonInstant.encodeToString(conversation.modeInjectionIds),
-            lorebookIds = JsonInstant.encodeToString(conversation.lorebookIds),
-            workspaceCwd = conversation.workspaceCwd ?: "",
-            folderId = conversation.folderId?.toString() ?: "",
-        )
-    }
-
-    fun conversationEntityToConversation(
-        conversationEntity: ConversationEntity,
-        messageNodes: List<MessageNode>
-    ): Conversation {
-        return Conversation(
-            id = Uuid.parse(conversationEntity.id),
-            title = conversationEntity.title,
-            messageNodes = messageNodes.filter { it.messages.isNotEmpty() },
-            createAt = Instant.ofEpochMilli(conversationEntity.createAt),
-            updateAt = Instant.ofEpochMilli(conversationEntity.updateAt),
-            assistantId = Uuid.parse(conversationEntity.assistantId),
-            chatSuggestions = JsonInstant.decodeFromString(conversationEntity.chatSuggestions),
-            isPinned = conversationEntity.isPinned,
-            customSystemPrompt = conversationEntity.customSystemPrompt.ifEmpty { null },
-            modeInjectionIds = JsonInstant.decodeFromString(conversationEntity.modeInjectionIds),
-            lorebookIds = JsonInstant.decodeFromString(conversationEntity.lorebookIds),
-            workspaceCwd = conversationEntity.workspaceCwd.ifEmpty { null },
-            folderId = conversationEntity.folderId.ifEmpty { null }?.let { Uuid.parse(it) },
-        )
     }
 
     fun getPinnedConversations(): Flow<List<Conversation>> {

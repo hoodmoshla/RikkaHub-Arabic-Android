@@ -40,6 +40,7 @@ import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV2Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV3Migration
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Avatar
+import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.InjectionPosition
 import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.PromptInjection
@@ -687,6 +688,44 @@ fun Settings.getCurrentChatModel(): Model? {
             provider.models.firstOrNull { it.type == ModelType.CHAT }
                 ?: provider.models.firstOrNull()
         }
+}
+
+/**
+ * 会话所属的助手（不含任何会话级覆盖），用于需要回写/持久化助手的场景。
+ */
+fun Settings.getConversationAssistant(conversation: Conversation): Assistant {
+    return getAssistantById(conversation.assistantId) ?: getCurrentAssistant()
+}
+
+/**
+ * 会话实际使用的 workspace(项目) ID：会话覆盖优先，否则回退到所属助手的绑定。
+ */
+fun Settings.resolveWorkspaceId(conversation: Conversation): Uuid? {
+    return conversation.workspaceId ?: getConversationAssistant(conversation).workspaceId
+}
+
+/**
+ * 解析会话实际使用的助手（只读渲染/生成用）。
+ *
+ * - 助手来自会话自身绑定的 [Conversation.assistantId]，找不到时回退到全局当前助手。
+ * - 如果会话设置了 workspace 覆盖 [Conversation.workspaceId]，则一并覆盖到返回的助手副本上，
+ *   使工具、系统提示注入等所有依赖 `assistant.workspaceId` 的逻辑都遵循会话级设置。
+ *
+ * 注意：返回的是副本，不要用它回写全局助手设置；需要回写时请使用 [getConversationAssistant]。
+ */
+fun Settings.resolveAssistant(conversation: Conversation): Assistant {
+    val assistant = getConversationAssistant(conversation)
+    return conversation.workspaceId?.let { assistant.copy(workspaceId = it) } ?: assistant
+}
+
+/**
+ * 解析会话实际使用的模型，优先级：会话覆盖 > 助手默认 > 全局默认。
+ */
+fun Settings.resolveChatModel(conversation: Conversation): Model? {
+    val assistant = getConversationAssistant(conversation)
+    return findModelById(conversation.modelId)
+        ?: findModelById(assistant.chatModelId ?: this.chatModelId)
+        ?: getCurrentChatModel()
 }
 
 fun Settings.getCurrentAssistant(): Assistant {

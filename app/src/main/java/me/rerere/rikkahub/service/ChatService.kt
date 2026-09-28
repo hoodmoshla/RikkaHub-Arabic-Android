@@ -73,6 +73,8 @@ import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import me.rerere.rikkahub.data.datastore.resolveAssistant
+import me.rerere.rikkahub.data.datastore.resolveChatModel
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Assistant
@@ -119,6 +121,8 @@ internal fun createForkConversation(
     customSystemPrompt = source.customSystemPrompt,
     modeInjectionIds = source.modeInjectionIds,
     lorebookIds = source.lorebookIds,
+    modelId = source.modelId,
+    workspaceId = source.workspaceId,
     workspaceCwd = source.workspaceCwd,
     folderId = source.folderId,
 )
@@ -531,10 +535,8 @@ class ChatService(
     ) {
         val settings = settingsStore.settingsFlow.first()
         val initialConversation = getConversationFlow(conversationId).value
-        val assistant = settings.getAssistantById(initialConversation.assistantId)
-            ?: settings.getCurrentAssistant()
-        val model = settings.findModelById(assistant.chatModelId ?: settings.chatModelId)
-            ?: settings.getCurrentChatModel()
+        val assistant = settings.resolveAssistant(initialConversation)
+        val model = settings.resolveChatModel(initialConversation)
             ?: return
 
         val senderName = if (assistant.useAssistantAvatar) {

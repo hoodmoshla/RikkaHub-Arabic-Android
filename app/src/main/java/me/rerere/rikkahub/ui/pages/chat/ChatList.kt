@@ -90,7 +90,7 @@ import kotlinx.coroutines.launch
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.getAssistantById
+import me.rerere.rikkahub.data.datastore.resolveAssistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.service.ChatError
@@ -260,8 +260,8 @@ private fun ChatListNormal(
         )
     }
 
-    val assistant = remember(settings.assistants, conversation.assistantId) {
-        settings.getAssistantById(conversation.assistantId)
+    val assistant = remember(settings.assistants, conversation.assistantId, conversation.workspaceId) {
+        settings.resolveAssistant(conversation)
     }
     val modelById = remember(settings.providers) {
         settings.providers
