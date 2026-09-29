@@ -45,6 +45,7 @@ import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.utils.CrashHandler
 import me.rerere.rikkahub.utils.DatabaseUtil
 import me.rerere.rikkahub.utils.UpdateCheckWorker
+import me.rerere.rikkahub.utils.UpdateDownloadManager
 import java.util.concurrent.TimeUnit
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.WorkspaceManager
@@ -89,6 +90,9 @@ class RikkaHubApp : Application(), Configuration.Provider {
         }
         this.createNotificationChannel()
         this.schedulePeriodicUpdateCheck()
+        // Restore an interrupted/finished update download (progress, partial file, ready APK).
+        runCatching { get<UpdateDownloadManager>().restoreAndResume() }
+            .onFailure { Log.w(TAG, "restoreUpdateDownload failed", it) }
 
         // set cursor window size to 32MB
         DatabaseUtil.setCursorWindowSize(32 * 1024 * 1024)

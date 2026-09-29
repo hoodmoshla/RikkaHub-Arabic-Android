@@ -146,14 +146,10 @@
         android:name="android.support.FILE_PROVIDER_PATHS"
         android:resource="@xml/file_paths" />
     </provider>
-    <receiver
-      android:name=".utils.UpdateDownloadReceiver"
-      android:exported="true">
-      <intent-filter>
-        <action android:name="android.intent.action.DOWNLOAD_COMPLETE" />
-        <action android:name="android.intent.action.DOWNLOAD_NOTIFICATION_CLICKED" />
-      </intent-filter>
-    </receiver>
+    <service
+      android:name=".service.UpdateDownloadService"
+      android:exported="false"
+      android:foregroundServiceType="dataSync" />
     <provider
       android:name=".data.provider.WorkspaceDocumentsProvider"
       android:authorities="${applicationId}.documents"

@@ -1,16 +1,13 @@
 package me.rerere.rikkahub.utils
 
-import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInfo
 import android.net.Uri
 import android.os.Build
-import android.os.Environment
 import android.provider.Settings
 import android.widget.Toast
 import androidx.core.content.FileProvider
-import androidx.core.net.toUri
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -120,68 +117,6 @@ class UpdateChecker(
         )
     }
 
-    fun downloadUpdate(context: Context, download: UpdateDownload) {
-        runCatching {
-            val downloadDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-                ?: context.filesDir
-            val destinationFile = File(downloadDir, download.name)
-
-            // If a *newer* valid APK is already fully downloaded on disk, install immediately!
-            // Only a strictly newer build counts: the GitHub asset names are stable across
-            // releases, so a leftover file from a previous version must never short-circuit
-            // the download of the current release.
-            if (UpdateInstaller.isInstallableUpdate(context, destinationFile)) {
-                Toast.makeText(
-                    context,
-                    context.getString(R.string.update_package_ready_installing),
-                    Toast.LENGTH_SHORT
-                ).show()
-                UpdateInstaller.installApk(context, destinationFile)
-                return
-            }
-
-            // Remove any stale, partial, or corrupted file to ensure a clean download
-            if (destinationFile.exists()) {
-                destinationFile.delete()
-            }
-
-            val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
-                ?: throw IllegalStateException("DownloadManager service not available")
-
-            val request = DownloadManager.Request(download.url.toUri()).apply {
-                setTitle("RikkaHub Arabic - ${download.name}")
-                setDescription(context.getString(R.string.downloading_update_package))
-                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI or DownloadManager.Request.NETWORK_MOBILE)
-                setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, download.name)
-                setMimeType("application/vnd.android.package-archive")
-                addRequestHeader("User-Agent", "RikkaHub-Arabic/${BuildConfig.VERSION_NAME}")
-            }
-
-            val downloadId = dm.enqueue(request)
-
-            // Save download tracking info in SharedPreferences
-            context.getSharedPreferences("update_download_pref", Context.MODE_PRIVATE)
-                .edit()
-                .putLong("last_download_id", downloadId)
-                .putString("last_apk_name", download.name)
-                .putString("last_apk_path", destinationFile.absolutePath)
-                .apply()
-
-            Toast.makeText(
-                context,
-                context.getString(R.string.downloading_update_package),
-                Toast.LENGTH_SHORT
-            ).show()
-        }.onFailure { e ->
-            Toast.makeText(
-                context,
-                "${context.getString(R.string.update_failed)}: ${e.localizedMessage ?: "Unknown error"}",
-                Toast.LENGTH_LONG
-            ).show()
-            context.openUrl(download.url)
-        }
-    }
 }
 
 object UpdateInstaller {
@@ -241,14 +176,10 @@ object UpdateInstaller {
             return
         }
 
-        val contentUri: Uri = try {
-            FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                apkFile
-            )
-        } catch (e: Exception) {
-            Toast.makeText(context, "${context.getString(R.string.update_failed)}: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+        // content:// URI through FileProvider (required on Android 7+). Built up-front so an
+        // invalid file is reported before touching the install permission screen.
+        val contentUri: Uri = buildContentUri(context, apkFile) ?: run {
+            Toast.makeText(context, context.getString(R.string.update_failed), Toast.LENGTH_LONG).show()
             return
         }
 
@@ -269,17 +200,32 @@ object UpdateInstaller {
             return
         }
 
-        val installIntent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(contentUri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-
         try {
-            context.startActivity(installIntent)
+            context.startActivity(buildInstallIntent(context, contentUri))
         } catch (e: Exception) {
             Toast.makeText(context, "${context.getString(R.string.update_failed)}: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    /** FileProvider content:// URI for [apkFile], or null when it cannot be built. */
+    fun buildContentUri(context: Context, apkFile: File): Uri? = runCatching {
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apkFile)
+    }.getOrNull()
+
+    /**
+     * The official Android package-installer intent for a downloaded APK, or null when the file
+     * cannot be exposed. Used by the in-app "install" button and by the ready notification action;
+     * installation is always confirmed by the user, never silent.
+     */
+    fun buildInstallIntent(context: Context, apkFile: File): Intent? {
+        val uri = buildContentUri(context, apkFile) ?: return null
+        return buildInstallIntent(context, uri)
+    }
+
+    fun buildInstallIntent(context: Context, contentUri: Uri): Intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(contentUri, "application/vnd.android.package-archive")
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
 }
 

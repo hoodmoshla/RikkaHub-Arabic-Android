@@ -33,6 +33,7 @@ val viewModelModule = module {
             conversationRepo = get(),
             chatService = get(),
             updateChecker = get(),
+            updateDownloadManager = get(),
             filesManager = get(),
             favoriteRepository = get(),
         )
