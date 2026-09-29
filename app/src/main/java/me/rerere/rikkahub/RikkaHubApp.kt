@@ -12,6 +12,12 @@ import androidx.compose.runtime.tooling.ComposeStackTraceMode
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.work.Configuration
+import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -38,6 +44,8 @@ import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.utils.CrashHandler
 import me.rerere.rikkahub.utils.DatabaseUtil
+import me.rerere.rikkahub.utils.UpdateCheckWorker
+import java.util.concurrent.TimeUnit
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.WorkspaceManager
 import org.koin.android.ext.android.get
@@ -51,8 +59,14 @@ private const val TAG = "RikkaHubApp"
 const val CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID = "chat_completed"
 const val CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID = "chat_live_update"
 const val WEB_SERVER_NOTIFICATION_CHANNEL_ID = "web_server"
+const val UPDATE_NOTIFICATION_CHANNEL_ID = "app_update"
 
-class RikkaHubApp : Application() {
+class RikkaHubApp : Application(), Configuration.Provider {
+    // On-demand WorkManager initialization (the default initializer is removed in the manifest)
+    // so the periodic update check can be scheduled.
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder().build()
+
     override fun onCreate() {
         super.onCreate()
         // Restore files and settings before eager Koin singletons or workers can access them.
@@ -74,6 +88,7 @@ class RikkaHubApp : Application() {
             modules(appModule, viewModelModule, dataSourceModule, repositoryModule)
         }
         this.createNotificationChannel()
+        this.schedulePeriodicUpdateCheck()
 
         // set cursor window size to 32MB
         DatabaseUtil.setCursorWindowSize(32 * 1024 * 1024)
@@ -238,6 +253,39 @@ class RikkaHubApp : Application() {
             .setShowBadge(false)
             .build()
         notificationManager.createNotificationChannel(webServerChannel)
+
+        val updateChannel = NotificationChannelCompat
+            .Builder(UPDATE_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_DEFAULT)
+            .setName(getString(R.string.notification_channel_app_update))
+            .setVibrationEnabled(false)
+            .build()
+        notificationManager.createNotificationChannel(updateChannel)
+    }
+
+    /**
+     * Schedules the periodic update check (also runs when the app was never opened on any
+     * update-related screen). Failures here must never break app startup.
+     */
+    private fun schedulePeriodicUpdateCheck() {
+        runCatching {
+            val request = PeriodicWorkRequestBuilder<UpdateCheckWorker>(
+                UpdateCheckWorker.INTERVAL_HOURS,
+                TimeUnit.HOURS,
+            )
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build()
+                )
+                .build()
+            WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+                UpdateCheckWorker.UNIQUE_WORK_NAME,
+                ExistingPeriodicWorkPolicy.KEEP,
+                request,
+            )
+        }.onFailure {
+            Log.w(TAG, "schedulePeriodicUpdateCheck failed", it)
+        }
     }
 
     override fun onTerminate() {

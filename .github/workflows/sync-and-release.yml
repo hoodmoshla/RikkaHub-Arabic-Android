@@ -40,9 +40,13 @@ jobs:
   sync-build-release:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Arabic fork
+      # Always operate on master. Without an explicit ref, a manual dispatch from a feature
+      # branch would run the whole sync/build/release pipeline on that branch (and the merge
+      # step could be skipped or pushed to master by accident).
+      - name: Checkout Arabic fork (master)
         uses: actions/checkout@v4
         with:
+          ref: master
           fetch-depth: 0
           submodules: recursive
 
@@ -76,10 +80,19 @@ jobs:
           fi
 
           FORCE_BUILD="${{ github.event.inputs.force_build == 'true' }}"
+          SYNC_INPUT="${{ github.event.inputs.sync_upstream }}"
           IS_PUSH="${{ github.event_name == 'push' }}"
-          # Upstream is merged only for scheduled/manual runs; a push to master builds exactly
-          # what was pushed (predictable releases) instead of pulling upstream changes in.
-          SHOULD_SYNC="${{ github.event_name == 'schedule' || github.event.inputs.sync_upstream == 'true' }}"
+
+          # Upstream sync is ON by default for every trigger. Only an explicit
+          # sync_upstream=false (manual dispatch) disables it. An empty/absent input used to
+          # evaluate to "false" and silently skipped "Detect and merge official upstream",
+          # which is why new official releases were never merged.
+          if [ "$SYNC_INPUT" = "false" ]; then
+            SHOULD_SYNC="false"
+            echo "Upstream sync explicitly disabled by the workflow_dispatch input."
+          else
+            SHOULD_SYNC="true"
+          fi
 
           SHOULD_PROCEED="false"
           if [ "$FORCE_BUILD" = "true" ]; then
@@ -90,7 +103,7 @@ jobs:
             echo "Push to master detected; building and releasing the updated Arabic code."
           elif [ "$HAS_NEW_UPSTREAM" = "true" ] && [ "$SHOULD_SYNC" = "true" ]; then
             SHOULD_PROCEED="true"
-            echo "Upstream updates detected; proceeding with sync and build."
+            echo "New official RikkaHub release detected; proceeding with sync and build."
           else
             echo "No new upstream changes and build not forced. Halting workflow cleanly without Merge, Build, or Release."
           fi
@@ -111,7 +124,7 @@ jobs:
             echo "$CONFLICT_FILES"
 
             # Sensitive files that must NEVER be blindly overwritten or conflicted
-            SENSITIVE_PATTERNS="values-ar/|AppLocale\.kt|SettingPreferencesGeneralPage\.kt|DefaultProviders\.kt|app/build\.gradle\.kts|AndroidManifest\.xml|RouteActivity\.kt|UpdateChecker\.kt|UpdateCard\.kt|UpdateDownloadReceiver\.kt"
+            SENSITIVE_PATTERNS="values-ar/|AppLocale\.kt|SettingPreferencesGeneralPage\.kt|DefaultProviders\.kt|app/build\.gradle\.kts|AndroidManifest\.xml|RouteActivity\.kt|UpdateChecker\.kt|UpdateCard\.kt|UpdateDownloadReceiver\.kt|UpdateCheckWorker\.kt|PreferencesStore\.kt|Conversation\.kt|ConversationEntity\.kt|ConversationRepository\.kt|ChatService\.kt|ChatVM\.kt|ChatPage\.kt|ChatInput\.kt|ConversationScopedSettingsTest\.kt|ConversationPersistenceTest\.kt"
 
             SENSITIVE_CONFLICTS=$(echo "$CONFLICT_FILES" | grep -E "$SENSITIVE_PATTERNS" || true)
             if [ -n "$SENSITIVE_CONFLICTS" ]; then
@@ -129,6 +142,22 @@ jobs:
             git commit -m "chore(upstream): sync and merge upstream/master ($(git rev-parse --short upstream/master))"
             echo "merged_upstream=true" >> "$GITHUB_OUTPUT"
           fi
+
+      # Hard invariant: the commit that will be built and released must really contain the
+      # official upstream release. This is what prevents "the version number changed but the
+      # code did not" (e.g. releasing 2.5.5 while still shipping 2.5.4 sources).
+      - name: Verify official upstream is contained
+        id: upstream_check
+        if: steps.check_upstream.outputs.should_proceed == 'true'
+        run: |
+          if ! git merge-base --is-ancestor upstream/master HEAD; then
+            echo "::error::upstream/master is NOT contained in the commit that would be built."
+            echo "Refusing to publish an APK whose version is newer than its code."
+            exit 1
+          fi
+          UPSTREAM_SHORT=$(git rev-parse --short upstream/master)
+          echo "upstream_short=$UPSTREAM_SHORT" >> "$GITHUB_OUTPUT"
+          echo "OK: the commit to be built contains official upstream $UPSTREAM_SHORT"
 
       - name: Determine Release Version
         id: version_step
@@ -159,9 +188,11 @@ jobs:
           print(f'Arabic resource covers {len(base)} base strings')
           PY
 
-      - name: Validate Arabic integration hooks and Provider architecture
+      - name: Validate Arabic integration hooks, provider architecture and protected changes
         if: steps.check_upstream.outputs.should_proceed == 'true'
         run: |
+          set -e
+          # --- Arabic distribution identity -------------------------------------------------
           test -f app/src/main/res/values-ar/strings.xml
           grep -q 'AppLanguage.ARABIC' app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingPreferencesGeneralPage.kt
           grep -q 'AppLocale.wrap' app/src/main/java/me/rerere/rikkahub/RouteActivity.kt
@@ -169,7 +200,20 @@ jobs:
           grep -q 'applicationId = "me.rerere.rikkahub.arabic.dev"' app/build.gradle.kts
           grep -q 'RIKKAHUB_PROVIDER_ID' app/src/main/java/me/rerere/rikkahub/data/datastore/DefaultProviders.kt
           grep -q 'DEFAULT_AUTO_MODEL_ID' app/src/main/java/me/rerere/rikkahub/data/datastore/DefaultProviders.kt
-          echo "All critical Arabic integration hooks and provider configurations validated."
+
+          # --- Arbitrary updater ------------------------------------------------------------
+          grep -q 'hoodmoshla/RikkaHub-Arabic-Android' app/src/main/java/me/rerere/rikkahub/utils/UpdateChecker.kt
+          test -f app/src/main/java/me/rerere/rikkahub/utils/UpdateCheckWorker.kt
+
+          # --- Conversation scoped model / workspace isolation (d365238c) -------------------
+          # These markers must survive every upstream merge; a release without them would
+          # silently drop the per-conversation model & workspace feature.
+          grep -q 'fun Settings.getConversationAssistant(conversation: Conversation)' app/src/main/java/me/rerere/rikkahub/data/datastore/PreferencesStore.kt
+          grep -q 'fun Settings.resolveWorkspaceId(conversation: Conversation)' app/src/main/java/me/rerere/rikkahub/data/datastore/PreferencesStore.kt
+          grep -q 'fun Settings.resolveChatModel(conversation: Conversation)' app/src/main/java/me/rerere/rikkahub/data/datastore/PreferencesStore.kt
+          test -f app/src/test/java/me/rerere/rikkahub/data/datastore/ConversationScopedSettingsTest.kt
+
+          echo "All protected Arabic-distribution changes are present in the commit to be built."
 
       - name: Set up Java
         if: steps.check_upstream.outputs.should_proceed == 'true'
@@ -286,7 +330,7 @@ jobs:
 
       - name: Push validated upstream merge
         if: steps.check_upstream.outputs.should_proceed == 'true' && steps.merge_step.outputs.merged_upstream == 'true'
-        run: git push origin master
+        run: git push origin HEAD:master
 
       - name: Upload APK artifact
         if: steps.check_upstream.outputs.should_proceed == 'true'
@@ -309,6 +353,7 @@ jobs:
           تحديث رسمي لنسخة RikkaHub Arabic المستقلة.
 
           - **Application ID:** \`me.rerere.rikkahub.arabic.dev\`
+          - **Official RikkaHub base:** \`${{ steps.upstream_check.outputs.upstream_short }}\`
           - **التوقيع الرقمي:** Keystore دائم (SHA-256: \`27:32:61:44:BD:EE:8E:EF:A9:CD:7A:39:E8:0C:3A:53:22:E8:33:24:19:B8:6D:4B:13:CF:EC:BB:E9:EB:7B:73\`)
           - **التوافق:** تثبيت مباشر وتحديث فوق النسخة المثبتة حاليًا دون فقدان المحادثات أو الإعدادات.
           - **المميزات:** دعم كامل للغة العربية والاتجاه من اليمين لليسار (RTL) واختيار لغة التطبيق.

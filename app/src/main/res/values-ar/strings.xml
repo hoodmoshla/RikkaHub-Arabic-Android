@@ -437,6 +437,9 @@
   <string name="notification_channel_chat_completed">اكتملت المحادثة</string>
   <string name="notification_channel_chat_live_update">تقدم إنشاء المحادثة</string>
   <string name="notification_channel_web_server">خادم الويب</string>
+  <string name="notification_channel_app_update">تحديثات التطبيق</string>
+  <string name="update_notification_title">يتوفر تحديث RikkaHub Arabic</string>
+  <string name="update_notification_content">الإصدار %1$s متاح. افتح التطبيق لتنزيله وتثبيته.</string>
   <string name="notification_live_update_chip_thinking">يفكر</string>
   <string name="notification_live_update_chip_tool">أداة</string>
   <string name="notification_live_update_chip_writing">يكتب</string>

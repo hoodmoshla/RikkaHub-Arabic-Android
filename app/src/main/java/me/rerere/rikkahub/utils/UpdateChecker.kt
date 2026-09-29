@@ -12,81 +12,113 @@ import android.widget.Toast
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import java.io.File
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.json.Json
 import me.rerere.common.http.await
-import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
-private const val API_URL = "https://api.github.com/repos/hoodmoshla/RikkaHub-Arabic-Android/releases/latest"
+/**
+ * The Arabic distribution publishes its own releases in this repository. The update check must
+ * always read the *Arabic* releases (never the official ones): only the Arabic APKs are signed
+ * with the key that is allowed to update an installed Arabic build.
+ */
+internal const val ARABIC_RELEASES_API =
+    "https://api.github.com/repos/hoodmoshla/RikkaHub-Arabic-Android/releases?per_page=30"
+
+/** Re-check for a new Arabic release periodically, even when no app screen was opened. */
+private const val UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
 
 class UpdateChecker(
     private val client: OkHttpClient,
-    appScope: AppScope,
+    appScope: CoroutineScope,
+    // Overridable so the whole update flow can be exercised against a real HTTP endpoint.
+    private val releasesApi: String = ARABIC_RELEASES_API,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
-    val updateState: StateFlow<UiState<UpdateInfo>> = checkUpdate().stateIn(
-        scope = appScope,
-        started = SharingStarted.Lazily,
-        initialValue = UiState.Loading,
-    )
+    // Bumped by refresh() so the flow below re-runs the check.
+    private val refreshTrigger = MutableStateFlow(System.currentTimeMillis())
+
+    val updateState: StateFlow<UiState<UpdateInfo>> = refreshTrigger
+        .flatMapLatest { checkUpdate() }
+        .stateIn(
+            scope = appScope,
+            // Eagerly: checking starts as soon as the app process starts instead of waiting for
+            // a specific screen (update card / drawer) to be opened.
+            started = SharingStarted.Eagerly,
+            initialValue = UiState.Loading,
+        )
+
+    init {
+        // Periodic refresh while the process is alive. UpdateCheckWorker covers the case where
+        // the app was killed and restarted by the system.
+        appScope.launch {
+            while (true) {
+                delay(UPDATE_CHECK_INTERVAL_MS)
+                refresh()
+            }
+        }
+    }
+
+    /** Forces a new update check. */
+    fun refresh() {
+        refreshTrigger.value = System.currentTimeMillis()
+    }
+
+    /** One-shot check used by the background worker. Returns null when the check fails. */
+    suspend fun checkForUpdate(): UpdateInfo? = runCatching { fetchLatestUpdate() }.getOrNull()
 
     private fun checkUpdate(): Flow<UiState<UpdateInfo>> = flow {
         emit(UiState.Loading)
-        emit(
-            UiState.Success(
-                data = try {
-                    val response = client.newCall(
-                        Request.Builder()
-                            .url(API_URL)
-                            .get()
-                            .addHeader(
-                                "User-Agent",
-                                "RikkaHub Arabic ${BuildConfig.VERSION_NAME} #${BuildConfig.VERSION_CODE}"
-                            )
-                            .addHeader("Accept", "application/vnd.github+json")
-                            .build()
-                    ).await()
-                    if (response.isSuccessful) {
-                        val release = json.decodeFromString<GitHubRelease>(response.body.string())
-                        UpdateInfo(
-                            version = release.tagName.removePrefix("v"),
-                            publishedAt = release.publishedAt,
-                            changelog = release.body.orEmpty().ifBlank { release.name.orEmpty() },
-                            downloads = release.assets
-                                .filter { it.name.endsWith(".apk", ignoreCase = true) }
-                                .sortedWith(
-                                    compareBy(
-                                        { apkAssetPriority(it.name) },
-                                        { it.name.lowercase() },
-                                    )
-                                )
-                                .map { UpdateDownload(it.name, it.browserDownloadUrl, formatBytes(it.size)) },
-                        )
-                    } else {
-                        throw Exception("Failed to fetch update info")
-                    }
-                } catch (e: Exception) {
-                    throw Exception("Failed to fetch update info", e)
-                }
-            )
-        )
+        emit(UiState.Success(fetchLatestUpdate()))
     }.catch {
-        emit(UiState.Error(it))
+        emit(UiState.Error(Exception("Failed to fetch update info", it)))
     }.flowOn(Dispatchers.IO)
+
+    private suspend fun fetchLatestUpdate(): UpdateInfo {
+        val response = client.newCall(
+            Request.Builder()
+                .url(releasesApi)
+                .get()
+                .addHeader(
+                    "User-Agent",
+                    "RikkaHub Arabic ${BuildConfig.VERSION_NAME} #${BuildConfig.VERSION_CODE}"
+                )
+                .addHeader("Accept", "application/vnd.github+json")
+                .build()
+        ).await()
+        if (!response.isSuccessful) {
+            throw Exception("Failed to fetch update info: HTTP ${response.code}")
+        }
+        // Reads the whole release list and picks the highest version, so a failed/delayed CI run
+        // can never hide a newer Arabic release and ordering never depends on publish time.
+        val releases = json.decodeFromString<List<GitHubRelease>>(response.body.string())
+        val latest = UpdatePolicy.latestRelease(releases.mapNotNull { it.toCandidate() })
+            ?: throw Exception("No published Arabic release found")
+        return UpdateInfo(
+            version = latest.version,
+            publishedAt = latest.publishedAt,
+            changelog = latest.changelog,
+            downloads = latest.downloads,
+        )
+    }
 
     fun downloadUpdate(context: Context, download: UpdateDownload) {
         runCatching {
@@ -272,8 +304,57 @@ private data class GitHubRelease(
     val name: String? = null,
     val body: String? = null,
     @SerialName("published_at") val publishedAt: String,
+    val draft: Boolean = false,
+    val prerelease: Boolean = false,
     val assets: List<GitHubAsset> = emptyList(),
+) {
+    /** Maps to the pure policy type, or null for drafts/pre-releases that must be ignored. */
+    fun toCandidate(): ReleaseCandidate? {
+        if (draft || prerelease) return null
+        return ReleaseCandidate(
+            version = tagName.removePrefix("v"),
+            publishedAt = publishedAt,
+            changelog = body.orEmpty().ifBlank { name.orEmpty() },
+            downloads = assets
+                .filter { it.name.endsWith(".apk", ignoreCase = true) }
+                .sortedWith(compareBy({ apkAssetPriority(it.name) }, { it.name.lowercase() }))
+                .map { UpdateDownload(it.name, it.browserDownloadUrl, formatBytes(it.size)) },
+        )
+    }
+}
+
+/** A published Arabic release reduced to what the update policy needs. */
+internal data class ReleaseCandidate(
+    val version: String,
+    val publishedAt: String,
+    val changelog: String,
+    val downloads: List<UpdateDownload>,
 )
+
+/**
+ * Pure update-decision logic, kept free of Android/network dependencies so it can be unit tested.
+ */
+internal object UpdatePolicy {
+    /**
+     * The newest released version (proper SemVer comparison), ignoring drafts/pre-releases.
+     * Comparing versions — instead of trusting the order GitHub returns or a previous CI run —
+     * is what keeps updates detectable after a failed workflow.
+     */
+    fun latestRelease(releases: List<ReleaseCandidate>): ReleaseCandidate? =
+        releases.maxWithOrNull(
+            compareBy<ReleaseCandidate> { Version(it.version) }.thenBy { it.publishedAt }
+        )
+
+    /** True only when [latestVersion] is strictly newer than [installedVersion]. */
+    fun isUpdateAvailable(installedVersion: String, latestVersion: String): Boolean =
+        Version(latestVersion) > Version(installedVersion)
+
+    /** The APK to offer for a release: the universal build first, then the best ABI match. */
+    fun preferredDownload(downloads: List<UpdateDownload>): UpdateDownload? =
+        downloads.sortedWith(
+            compareBy({ apkAssetPriority(it.name) }, { it.name.lowercase() })
+        ).firstOrNull()
+}
 
 @Serializable
 private data class GitHubAsset(
