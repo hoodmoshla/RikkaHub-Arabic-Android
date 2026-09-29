@@ -294,6 +294,12 @@ object ModelRegistry {
         toolReasoningAbility()
     }
 
+    private val DEEPSEEK_FLASH = defineModel {
+        tokens("deepseek", "flash")
+        visionInput()
+        toolReasoningAbility()
+    }
+
     private val DEEPSEEK_V4_FLASH = defineModel {
         tokens("deepseek", "v", "4", "flash")
         toolReasoningAbility()
@@ -302,6 +308,13 @@ object ModelRegistry {
 
     private val DEEPSEEK_V4_FLASH_VISION_EXP = defineModel {
         tokens("deepseek", "v", "4", "flash", "vision", "exp")
+        visionInput()
+        toolReasoningAbility()
+        contextLength(1.m)
+    }
+
+    private val DEEPSEEK_V4_1_FLASH = defineModel {
+        tokens("deepseek", "v", "4", "1", "flash")
         visionInput()
         toolReasoningAbility()
         contextLength(1.m)
@@ -448,6 +461,12 @@ object ModelRegistry {
         toolReasoningAbility()
     }
 
+    private val STEP_5 = defineModel {
+        tokens("step", "5")
+        visionInput()
+        toolReasoningAbility()
+    }
+
     private val INTERN_S1 = defineModel {
         tokens("intern", "s", "1")
         visionInput()
@@ -537,6 +556,12 @@ object ModelRegistry {
         toolReasoningAbility()
     }
 
+    private val XIAOMI_MIMO_V2_6 = defineModel {
+        tokens("mimo", "v", "2", "6")
+        visionInput()
+        toolReasoningAbility()
+    }
+
     private val XIAOMI_MIMO_V3 = defineModel {
         tokens("mimo", "v", "3")
         visionInput()
@@ -623,8 +648,10 @@ object ModelRegistry {
         DEEPSEEK_CHAT,
         DEEPSEEK_R1_MODEL,
         DEEPSEEK_REASONER,
+        DEEPSEEK_FLASH,
         DEEPSEEK_V4_FLASH,
         DEEPSEEK_V4_FLASH_VISION_EXP,
+        DEEPSEEK_V4_1_FLASH,
         DEEPSEEK_V4_PRO,
         DEEPSEEK_V3_1,
         DEEPSEEK_V3_2,
@@ -649,6 +676,7 @@ object ModelRegistry {
         KIMI_K3_ALIAS,
         STEP_3,
         STEP_3_7_FLASH,
+        STEP_5,
         INTERN_S1,
         GLM_4_5,
         GLM_4_6,
@@ -666,6 +694,7 @@ object ModelRegistry {
         XIAOMI_MIMO_V2_PRO,
         XIAOMI_MIMO_V2_5,
         XIAOMI_MIMO_V2_5_PRO,
+        XIAOMI_MIMO_V2_6,
         XIAOMI_MIMO_V3,
         XIAOMI_MIMO_V3_PRO,
         HY3,

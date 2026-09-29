@@ -14,14 +14,20 @@ plugins {
 
 android {
     namespace = "me.rerere.rikkahub"
-    compileSdk = 37
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 2
+        }
+    }
 
     defaultConfig {
         applicationId = "me.rerere.rikkahub.arabic.dev"
         minSdk = 26
         targetSdk = 37
-        versionCode = (project.findProperty("releaseCode") as String?)?.toIntOrNull() ?: 1
-        versionName = (project.findProperty("releaseVersion") as String?) ?: "1.0.0"
+        // CI injects the real values (-PreleaseVersion/-PreleaseCode); the literals below keep a
+        // sane version for local builds and follow the official upstream release (2.5.5).
+        versionCode = (project.findProperty("releaseCode") as String?)?.toIntOrNull() ?: 190
+        versionName = (project.findProperty("releaseVersion") as String?) ?: "2.5.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -151,7 +157,16 @@ kotlin {
     }
 }
 
+// Local JVM tests need the desktop native library instead of the Android AAR.
+configurations.matching { it.name.endsWith("UnitTestRuntimeClasspath") }.configureEach {
+    resolutionStrategy.dependencySubstitution {
+        substitute(module("io.github.dokar3:quickjs-kt-android"))
+            .using(module("io.github.dokar3:quickjs-kt-jvm:${libs.versions.quickjs.get()}"))
+    }
+}
+
 dependencies {
+    implementation(libs.quickjs)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.process)
@@ -184,10 +199,12 @@ dependencies {
     // https://github.com/drewnoakes/metadata-extractor
     implementation(libs.metadata.extractor)
 
-    // Haze (background blur)
+    // Haze (background blur and glass)
     implementation(libs.haze)
     implementation(libs.haze.blur)
     implementation(libs.haze.blur.material3)
+    implementation(libs.haze.glass)
+    implementation(libs.haze.glass.material3)
 
     // koin
     implementation(platform(libs.koin.bom))

@@ -8,6 +8,7 @@ import kotlinx.coroutines.channels.onFailure
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -49,6 +50,7 @@ import me.rerere.ai.ui.metadataAs
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.KeyRoulette
 import me.rerere.ai.util.configureReferHeaders
+import me.rerere.ai.util.configureSessionHeaders
 import me.rerere.ai.util.encodeBase64
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
@@ -94,11 +96,7 @@ class ChatCompletionsAPI(
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
             .configureReferHeaders(providerSetting.baseUrl)
-            .apply {
-                if (providerSetting.baseUrl.toHttpUrl().host == "opencode.ai") {
-                    params.sessionId?.let { header("x-opencode-session", it) }
-                }
-            }
+            .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
             .build()
 
         Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
@@ -151,11 +149,7 @@ class ChatCompletionsAPI(
             .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
-            .apply {
-                if (providerSetting.baseUrl.toHttpUrl().host == "opencode.ai") {
-                    params.sessionId?.let { header("x-opencode-session", it) }
-                }
-            }
+            .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
             .build()
 
         Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
@@ -226,7 +220,7 @@ class ChatCompletionsAPI(
             eventSource.cancel()
         }
         // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
-    }.buffer(Channel.UNLIMITED)
+    }.buffer(Channel.UNLIMITED).flowOn(Dispatchers.IO)
 
     private fun buildChatCompletionRequest(
         messages: List<UIMessage>,
@@ -290,9 +284,10 @@ class ChatCompletionsAPI(
 
                     "dashscope.aliyuncs.com" -> {
                         // 阿里云百炼
-                        // https://bailian.console.aliyun.com/console?tab=doc#/doc/?type=model&url=https%3A%2F%2Fhelp.aliyun.com%2Fdocument_detail%2F2870973.html&renderType=iframe
-                        put("enable_thinking", level.isEnabled)
-                        if (level != ReasoningLevel.AUTO) put("thinking_budget", level.budgetTokens)
+                        // https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions
+                        if (level != ReasoningLevel.AUTO) {
+                            put("reasoning_effort", level.effort)
+                        }
                     }
 
                     "ark.cn-beijing.volces.com" -> {
@@ -414,10 +409,8 @@ class ChatCompletionsAPI(
                     }
 
                     else -> {
-                        // OpenAI 官方
-                        // 文档中，completions API 只支持 "low", "medium", "high"
                         if (level != ReasoningLevel.AUTO) {
-                            put("reasoning_effort", if (level.effort == "none") "low" else level.effort)
+                            put("reasoning_effort", level.effort)
                         }
                     }
                 }
@@ -519,7 +512,6 @@ class ChatCompletionsAPI(
                     group.tools.forEach { tool ->
                         add(buildJsonObject {
                             put("role", "tool")
-                            put("name", tool.toolName)
                             put("tool_call_id", tool.toolCallId)
                             put("content", tool.toToolResultContent(supportInputModalities))
                         })
