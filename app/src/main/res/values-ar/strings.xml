@@ -281,6 +281,7 @@
   <string name="chat_page_export_image">التصدير كصورة</string>
   <string name="chat_page_export_image_desc">تصدير المحادثة كصورة PNG</string>
   <string name="chat_page_export_image_expand_reasoning">توسيع التفسير</string>
+  <string name="chat_page_export_include_reasoning">تضمين التفسير</string>
   <string name="chat_page_export_markdown">Markdown</string>
   <string name="chat_page_export_markdown_desc">تصدير المحادثة كملف Markdown</string>
   <string name="chat_page_export_share_via">المشاركة عبر</string>
