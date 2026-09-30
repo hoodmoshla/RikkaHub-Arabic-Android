@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.di
 
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
@@ -44,9 +45,13 @@ val appModule = module {
         )
     }
 
-    single {
-        AppScope()
-    }
+    // The application scope is the app's single managed lifetime (SupervisorJob + Main).
+    single { AppScope() }
+
+    // Some definitions (UpdateChecker) take a plain CoroutineScope parameter. Expose the very same
+    // managed application scope for that type as well: without it Koin fails while building ChatVM
+    // with "No definition found for type 'kotlinx.coroutines.CoroutineScope'".
+    single<CoroutineScope> { get<AppScope>() }
 
     single<EmojiData> {
         EmojiUtils.loadEmoji(get())
