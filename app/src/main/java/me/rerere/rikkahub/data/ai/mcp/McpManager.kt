@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.ai.mcp
 
 import android.content.Context
+import android.util.Log
 import androidx.core.net.toUri
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
@@ -32,6 +33,8 @@ import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 import kotlin.io.encoding.Base64
 import kotlin.uuid.Uuid
+
+private const val TAG = "McpManager"
 
 /**
  * MCP 子系统的公共入口。
@@ -79,20 +82,27 @@ class McpManager(
         authorizationLauncher = CustomTabsOAuthAuthorizationLauncher,
         updateStatus = statusStore::update,
     )
-    private val sessionRegistry = McpSessionRegistry(
+    // The MCP session registry is the only place that touches the third-party MCP SDK (its client
+    // and transports). Creating it lazily keeps the SDK off the app-startup path: even a broken or
+    // incompatible SDK artifact can no longer make the DI graph (ChatService -> ChatVM) fail.
+    private val sessionRegistry by lazy { McpSessionRegistry(
         settingsStore = settingsStore,
         appScope = appScope,
         httpClient = httpClient,
         oauthCoordinator = oauthCoordinator,
         statusStore = statusStore,
-    )
+    ) }
 
     init {
         appScope.launch {
             settingsStore.settingsFlow
                 .map { settings -> settings.mcpServers }
                 .distinctUntilChanged()
-                .collect(sessionRegistry::reconcile)
+                .collect { servers ->
+                    // MCP is an optional feature: a failure here must never break the app.
+                    runCatching { sessionRegistry.reconcile(servers) }
+                        .onFailure { Log.w(TAG, "MCP reconcile failed", it) }
+                }
         }
     }
 

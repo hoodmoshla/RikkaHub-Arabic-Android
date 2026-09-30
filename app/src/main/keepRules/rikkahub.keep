@@ -29,3 +29,10 @@
 
 # Keep JlatexMath
 -keep class org.scilab.forge.jlatexmath.** { *; }
+
+# The MCP SDK is consumed as a plain JVM artifact that ships no consumer keep rules of its own.
+# Its client/transport classes and serialized RPC types are used through the SDK at runtime, so
+# protect them from shrinking and optimization (R8 itself stays enabled).
+-keep class io.modelcontextprotocol.** { *; }
+-keepclassmembers class io.modelcontextprotocol.** { *; }
+-dontwarn io.modelcontextprotocol.**
