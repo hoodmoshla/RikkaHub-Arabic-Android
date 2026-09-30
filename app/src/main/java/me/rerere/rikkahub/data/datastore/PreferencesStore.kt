@@ -782,7 +782,13 @@ fun Settings.resolveChatModel(conversation: Conversation): Model? {
 }
 
 fun Settings.getCurrentAssistant(): Assistant {
-    return this.assistants.find { it.id == assistantId } ?: this.assistants.first()
+    // Never throw when the stored configuration has no assistants. This is called synchronously
+    // while the chat session/view model is created (ChatService.createInitialConversation ->
+    // ConversationSessionManager.getOrCreate -> ChatVM property initializers), so an empty
+    // assistant list used to crash app startup with Koin's "Could not create instance for ChatVM".
+    // Falling back to a fresh default assistant keeps the app usable and preserves the data that
+    // is still valid instead of losing the whole session.
+    return this.assistants.find { it.id == assistantId } ?: this.assistants.firstOrNull() ?: Assistant()
 }
 
 fun Settings.getAssistantById(id: Uuid): Assistant? {
