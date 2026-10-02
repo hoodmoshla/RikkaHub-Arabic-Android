@@ -25,9 +25,9 @@ android {
         minSdk = 26
         targetSdk = 37
         // CI injects the real values (-PreleaseVersion/-PreleaseCode); the literals below keep a
-        // sane version for local builds and follow the official upstream release (2.5.5).
-        versionCode = (project.findProperty("releaseCode") as String?)?.toIntOrNull() ?: 190
-        versionName = (project.findProperty("releaseVersion") as String?) ?: "2.5.5"
+        // sane version for local builds and follow the official upstream release (2.5.6).
+        versionCode = (project.findProperty("releaseCode") as String?)?.toIntOrNull() ?: 191
+        versionName = (project.findProperty("releaseVersion") as String?) ?: "2.5.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -310,7 +310,7 @@ dependencies {
     implementation(project(":highlight"))
     implementation(project(":search"))
     implementation(project(":speech"))
-    implementation(project(":videogen"))
+    implementation(project(":mediagen"))
     implementation(project(":common"))
     implementation(project(":material3"))
     implementation(project(":workspace"))

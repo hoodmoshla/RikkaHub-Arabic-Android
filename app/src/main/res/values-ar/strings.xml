@@ -1445,4 +1445,7 @@
   <string name="update_card_speed_detail">%1$s · يتبقى %2$s</string>
   <string name="update_card_resumable_notice">تم حفظ التنزيل الجزئي — الاستئناف يكمل من حيث توقف.</string>
   <string name="update_card_dismiss">إخفاء</string>
+  <string name="error_fast_model_not_found">لم يتم العثور على النموذج السريع. يرجى اختيار واحد في الإعدادات.</string>
+  <string name="error_fast_model_provider_not_found">لم يتم العثور على مزوّد النموذج السريع</string>
+  <string name="assistant_page_clone_with_memories">نسخ الذاكرة أيضًا</string>
 </resources>
