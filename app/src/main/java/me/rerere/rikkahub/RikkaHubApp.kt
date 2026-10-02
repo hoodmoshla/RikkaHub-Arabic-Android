@@ -18,6 +18,7 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -303,9 +304,18 @@ class RikkaHubApp : Application(), Configuration.Provider {
     }
 }
 
-class AppScope : CoroutineScope by CoroutineScope(
+/**
+ * The application's single managed coroutine lifetime (`SupervisorJob` + `Dispatchers.Main`).
+ *
+ * The [dispatcher] is injectable (defaulting to `Dispatchers.Main`) purely so the scope can also
+ * be built in JVM unit tests, which have no Android main looper; production always uses the
+ * default and therefore keeps the exact same lifecycle as before.
+ */
+class AppScope(
+    dispatcher: CoroutineDispatcher = Dispatchers.Main,
+) : CoroutineScope by CoroutineScope(
     SupervisorJob()
-        + Dispatchers.Main
+        + dispatcher
         + CoroutineName("AppScope")
         + CoroutineExceptionHandler { _, e ->
         Log.e(TAG, "AppScope exception", e)

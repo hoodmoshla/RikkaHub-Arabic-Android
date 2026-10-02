@@ -48,9 +48,10 @@ val appModule = module {
     // The application scope is the app's single managed lifetime (SupervisorJob + Main).
     single { AppScope() }
 
-    // Some definitions (UpdateChecker) take a plain CoroutineScope parameter. Expose the very same
-    // managed application scope for that type as well: without it Koin fails while building ChatVM
-    // with "No definition found for type 'kotlinx.coroutines.CoroutineScope'".
+    // Keep the managed application scope answerable for the generic CoroutineScope type as well.
+    // (UpdateChecker now depends on the concrete AppScope above, but exposing the same instance
+    // for CoroutineScope keeps other/future definitions from reintroducing the
+    // "No definition found for type 'kotlinx.coroutines.CoroutineScope'" crash.)
     single<CoroutineScope> { get<AppScope>() }
 
     single<EmojiData> {

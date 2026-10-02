@@ -9,7 +9,6 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import java.io.File
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -26,6 +25,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.json.Json
 import me.rerere.common.http.await
+import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
 import okhttp3.OkHttpClient
@@ -44,7 +44,11 @@ private const val UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
 
 class UpdateChecker(
     private val client: OkHttpClient,
-    appScope: CoroutineScope,
+    // The application's own managed scope. It must be the concrete `AppScope` (not a free-floating
+    // `CoroutineScope`): the app module only ever declares `AppScope`, and depending on a generic
+    // `CoroutineScope` made Koin fail to build the checker - and therefore ChatVM - with
+    // "No definition found for type 'kotlinx.coroutines.CoroutineScope'" whenever ChatPage opened.
+    appScope: AppScope,
     // Overridable so the whole update flow can be exercised against a real HTTP endpoint.
     private val releasesApi: String = ARABIC_RELEASES_API,
 ) {

@@ -2,10 +2,9 @@ package me.rerere.rikkahub.utils
 
 import com.sun.net.httpserver.HttpServer
 import java.net.InetSocketAddress
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
+import me.rerere.rikkahub.AppScope
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -32,7 +31,7 @@ class UpdateCheckerIntegrationTest {
 
     private lateinit var server: HttpServer
     private lateinit var baseUrl: String
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = AppScope(Dispatchers.IO)
 
     private var responseBody: String = "[]"
     private var responseCode: Int = 200
