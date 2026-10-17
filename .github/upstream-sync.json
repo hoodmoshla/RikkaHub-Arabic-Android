@@ -1,0 +1,6 @@
+{
+  "_comment": "State for the Arabic upstream-sync workflow. Written only when an upstream merge is blocked by conflicts, so the 6-hourly schedule does not retry the same failing merge. Clearing 'blockedUpstream' (or running the workflow with force_sync=true) forces a new attempt.",
+  "blockedUpstream": "",
+  "blockedFiles": [],
+  "blockedAt": ""
+}
