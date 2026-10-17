@@ -85,8 +85,26 @@ def main():
     check("outcome reports job failure honestly",
           outcome is not None and 'job.status' in outcome.get("run", "") and "FAILED" in outcome.get("run", ""))
 
-    # 4c. Previously-existing protections must still be present.
-    check("Arabic hooks validation present", "AppLanguage.ARABIC" in text and "AppLocale.wrap" in text)
+    # 4d. A CI-only push must not publish an app release.
+    check("CI-only push does not trigger a build",
+          "APP_CHANGED" in text and 'APP_CHANGED" = "true"' in text)
+
+    def plan_build(is_push, app_changed, force, mode):
+        if force or mode == "build-only":
+            return True
+        return bool(is_push and app_changed)
+
+    for name, args, exp in [
+        ("CI-only push", (True, False, False, "auto"), False),
+        ("app-code push", (True, True, False, "auto"), True),
+        ("build-only dispatch", (False, False, False, "build-only"), True),
+        ("force_build", (False, False, True, "auto"), True),
+        ("scheduled run (no push)", (False, False, False, "auto"), False),
+    ]:
+        got = plan_build(*args)
+        check(f"plan build: {name}", got == exp, f"got={got}")
+
+    # 4c. Previously-existing protections must still be present.    check("Arabic hooks validation present", "AppLanguage.ARABIC" in text and "AppLocale.wrap" in text)
     check("conversation-scoped validation present",
           "getConversationAssistant" in text and "resolveChatModel" in text)
     check("APK artifact upload present", "actions/upload-artifact@v4" in text)

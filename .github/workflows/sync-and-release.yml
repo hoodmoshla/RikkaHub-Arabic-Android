@@ -136,16 +136,33 @@ jobs:
             SHOULD_SYNC="true"
           fi
 
-          # Should we build / sign / release in this run?
+          # Did this push change anything other than CI/docs? A CI-only push must NOT publish
+          # an app release: a release is produced by a successful upstream sync or by an
+          # explicit build-only/force_build request.
+          APP_CHANGED="false"
+          if [ "$IS_PUSH" = "true" ]; then
+            BEFORE="${{ github.event.before }}"
+            AFTER="${{ github.event.after }}"
+            if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
+               && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+              CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" 2>/dev/null || true)
+            else
+              CHANGED=$(git diff-tree --no-commit-id --name-only -r "$AFTER" 2>/dev/null || true)
+            fi
+            if printf '%s\n' "$CHANGED" | grep -vE '^(\.github/|docs/)|\.md$' | grep -q .; then
+              APP_CHANGED="true"
+            fi
+            echo "Push non-CI app changes: $APP_CHANGED"
+            printf '%s\n' "$CHANGED" | sed 's/^/  changed: /'
+          fi
+
+          # Build the CURRENT master only when explicitly requested or when the push really
+          # changed app code. (A clean upstream merge is handled later by the C2 gate.)
           SHOULD_BUILD="false"
-          if [ "$FORCE" = "true" ]; then
+          if [ "$FORCE" = "true" ] || [ "$MODE" = "build-only" ]; then
             SHOULD_BUILD="true"
-          elif [ "$MODE" = "build-only" ]; then
+          elif [ "$IS_PUSH" = "true" ] && [ "$APP_CHANGED" = "true" ]; then
             SHOULD_BUILD="true"
-          elif [ "$IS_PUSH" = "true" ]; then
-            SHOULD_BUILD="true"
-          elif [ "$MODE" = "sync-only" ]; then
-            SHOULD_BUILD="false"
           fi
 
           echo "should_sync=$SHOULD_SYNC" >> "$GITHUB_OUTPUT"
@@ -159,6 +176,7 @@ jobs:
           | mode | \`$MODE\` |
           | upstream | \`$UPSTREAM_SHA\` |
           | new upstream? | \`$HAS_NEW\` |
+          | app files changed by push? | \`$APP_CHANGED\` |
           | previously blocked | \`${BLOCKED_SHA:-none}\` |
           | will sync | \`$SHOULD_SYNC\` |
           | will build | \`$SHOULD_BUILD\` |
