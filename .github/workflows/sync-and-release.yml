@@ -271,10 +271,35 @@ jobs:
           name: upstream-sync-report
           path: sync-report/
 
+      # ---- C2. Gate: decide whether this run may build/release -----------------------
+      # A blocked sync must never lead to a release *caused by* the sync, but an explicit
+      # push/force/build-only must still be able to build the current master.
+      - name: 'C2) Gate build/release'
+        id: gate
+        if: always()
+        run: |
+          BLOCKED="${{ steps.merge.outputs.blocked }}"
+          MERGED="${{ steps.merge.outputs.merged_upstream }}"
+          CURRENT="${{ steps.plan.outputs.should_build }}"
+          MODE="${{ steps.plan.outputs.mode }}"
+          DO_BUILD="false"
+          if [ "$MODE" = "sync-only" ]; then
+            DO_BUILD="false"       # sync-only is a dry-run: never build/push/release
+          elif [ "$CURRENT" = "true" ]; then
+            DO_BUILD="true"        # push / force / build-only: build current master
+          elif [ "$MERGED" = "true" ]; then
+            DO_BUILD="true"        # clean upstream merge: build & release the merged commit
+          fi
+          if [ "$BLOCKED" = "true" ] && [ "$CURRENT" != "true" ]; then
+            DO_BUILD="false"       # blocked sync with no explicit build request -> no release
+          fi
+          echo "do_build=$DO_BUILD" >> "$GITHUB_OUTPUT"
+          echo "gate: mode=$MODE merged=$MERGED blocked=$BLOCKED build_current=$CURRENT -> do_build=$DO_BUILD"
+
       # ---- D. Hard invariant: the built commit must contain upstream -----------------
       - name: 'D) Verify official upstream is contained'
         id: upstream_check
-        if: steps.plan.outputs.should_build == 'true'
+        if: steps.gate.outputs.do_build == 'true'
         run: |
           if [ "${{ steps.merge.outputs.merged_upstream }}" = "true" ]; then
             if ! git merge-base --is-ancestor upstream/master HEAD; then
@@ -293,7 +318,7 @@ jobs:
       # ---- E. Release version ---------------------------------------------------------
       - name: 'E) Determine Release Version'
         id: version_step
-        if: steps.plan.outputs.should_build == 'true'
+        if: steps.gate.outputs.do_build == 'true'
         run: |
           UPSTREAM_TAG=$(git describe --tags --match "[0-9]*" --abbrev=0 upstream/master 2>/dev/null || echo "2.5.1")
           BASE_VERSION=$(echo "$UPSTREAM_TAG" | sed 's/^v//')
@@ -306,7 +331,7 @@ jobs:
 
       # ---- F. Arabic resource completeness -------------------------------------------
       - name: 'F) Validate Arabic resource completeness'
-        if: steps.plan.outputs.should_build == 'true'
+        if: steps.gate.outputs.do_build == 'true'
         run: |
           python3 - <<'PY'
           import re
@@ -323,7 +348,7 @@ jobs:
 
       # ---- G. Protected Arabic-distribution invariants -------------------------------
       - name: 'G) Validate Arabic integration hooks and protected changes'
-        if: steps.plan.outputs.should_build == 'true'
+        if: steps.gate.outputs.do_build == 'true'
         run: |
           set -e
           test -f app/src/main/res/values-ar/strings.xml
@@ -343,24 +368,24 @@ jobs:
 
       # ---- H. Toolchains --------------------------------------------------------------
       - name: 'H) Set up Java / pnpm / Node / Gradle'
-        if: steps.plan.outputs.should_build == 'true'
+        if: steps.gate.outputs.do_build == 'true'
         run: echo "toolchains are configured in the next steps"
 
       - name: Set up Java
-        if: steps.plan.outputs.should_build == 'true'
+        if: steps.gate.outputs.do_build == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up pnpm
-        if: steps.plan.outputs.should_build == 'true'
+        if: steps.gate.outputs.do_build == 'true'
         uses: pnpm/action-setup@v4
         with:
           version: 11
 
       - name: Set up Node
-        if: steps.plan.outputs.should_build == 'true'
+        if: steps.gate.outputs.do_build == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -368,22 +393,22 @@ jobs:
           cache-dependency-path: web-ui/pnpm-lock.yaml
 
       - name: Install web-ui dependencies
-        if: steps.plan.outputs.should_build == 'true'
+        if: steps.gate.outputs.do_build == 'true'
         working-directory: web-ui
         run: pnpm install --frozen-lockfile
 
       - name: Set up Gradle
-        if: steps.plan.outputs.should_build == 'true'
+        if: steps.gate.outputs.do_build == 'true'
         uses: gradle/actions/setup-gradle@v4
 
       # ---- I. Tests -------------------------------------------------------------------
       - name: 'I) Run JVM unit tests'
-        if: steps.plan.outputs.should_build == 'true'
+        if: steps.gate.outputs.do_build == 'true'
         run: ./gradlew test --no-daemon
 
       # ---- J. Signing -----------------------------------------------------------------
       - name: 'J) Restore signing key'
-        if: steps.plan.outputs.should_build == 'true'
+        if: steps.gate.outputs.do_build == 'true'
         env:
           KEYSTORE_B64: ${{ secrets.ARABIC_DEV_KEYSTORE_B64 }}
           STORE_PASSWORD: ${{ secrets.ARABIC_DEV_STORE_PASSWORD }}
@@ -402,7 +427,7 @@ jobs:
 
       # ---- K. Build -------------------------------------------------------------------
       - name: 'K) Build signed universal APK'
-        if: steps.plan.outputs.should_build == 'true'
+        if: steps.gate.outputs.do_build == 'true'
         env:
           RELEASE_VERSION: ${{ steps.version_step.outputs.release_version }}
           RELEASE_CODE: ${{ steps.version_step.outputs.release_code }}
@@ -410,7 +435,7 @@ jobs:
 
       # ---- L. Verify APK --------------------------------------------------------------
       - name: 'L) Verify generated APK integrity (signature + applicationId)'
-        if: steps.plan.outputs.should_build == 'true'
+        if: steps.gate.outputs.do_build == 'true'
         run: |
           python3 - <<'PY'
           import zipfile, struct, hashlib, os, sys
@@ -455,11 +480,11 @@ jobs:
 
       # ---- M. Push the validated merge (last, only after everything passed) -----------
       - name: 'M) Push validated upstream merge'
-        if: steps.plan.outputs.should_build == 'true' && steps.merge.outputs.merged_upstream == 'true'
+        if: steps.gate.outputs.do_build == 'true' && steps.merge.outputs.merged_upstream == 'true'
         run: git push origin HEAD:master
 
       - name: Upload APK artifact
-        if: steps.plan.outputs.should_build == 'true'
+        if: steps.gate.outputs.do_build == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: RikkaHub-Arabic-Release-APK
@@ -468,7 +493,7 @@ jobs:
 
       # ---- N. Publish release ---------------------------------------------------------
       - name: 'N) Publish GitHub Release'
-        if: steps.plan.outputs.should_build == 'true'
+        if: steps.gate.outputs.do_build == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_VERSION: ${{ steps.version_step.outputs.release_version }}
@@ -495,6 +520,30 @@ jobs:
           gh release upload "$TAG_NAME" \
             --repo "$TARGET_REPO" \
             app/build/outputs/apk/release/app-universal-release.apk --clobber
+
+      # ---- O. Explicit outcome: distinguish "blocked, needs review" from "built & released"
+      - name: 'O) Outcome'
+        if: always()
+        run: |
+          STATUS="${{ job.status }}"
+          BLOCKED="${{ steps.merge.outputs.blocked }}"
+          MERGED="${{ steps.merge.outputs.merged_upstream }}"
+          DO_BUILD="${{ steps.gate.outputs.do_build }}"
+          if [ "$STATUS" != "success" ]; then
+            echo "::error::Pipeline FAILED ($STATUS) — nothing was released."
+            echo "❌ **Pipeline failed ($STATUS).** No APK was built or released." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$BLOCKED" = "true" ]; then
+            echo "::warning::Upstream sync BLOCKED by conflicts — master unchanged, nothing released. See the 'Attempt upstream merge' report."
+            echo "⛔ **Sync blocked (needs human review).** master unchanged; no build/release was attempted." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$DO_BUILD" = "true" ] && [ "$MERGED" = "true" ]; then
+            echo "✅ **Upstream merged + Arabic APK built and released.**" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$DO_BUILD" = "true" ]; then
+            echo "✅ **Arabic APK built and released from the current master (no upstream merge).**" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ℹ️ **Nothing to do** — no new upstream and no build requested." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Remove release-only files
         if: always()

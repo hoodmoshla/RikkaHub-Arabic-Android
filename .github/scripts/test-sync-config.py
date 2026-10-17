@@ -45,11 +45,12 @@ def main():
 
     # 2. Phase isolation: fetch, decide, merge, verify, build, push, release.
     for phase in ("A) Fetch upstream", "B) Decide phase", "C) Attempt upstream merge",
+                  "C2) Gate build/release",
                   "D) Verify official upstream is contained", "E) Determine Release Version",
                   "F) Validate Arabic resource completeness", "G) Validate Arabic integration hooks",
                   "I) Run JVM unit tests", "J) Restore signing key", "K) Build signed universal APK",
                   "L) Verify generated APK integrity", "M) Push validated upstream merge",
-                  "N) Publish GitHub Release"):
+                  "N) Publish GitHub Release", "O) Outcome"):
         check(f"phase present: {phase}", any(n.startswith(phase) for n in names))
 
     # 3. The merge step must run on an isolated branch and must never hard-fail on conflicts.
@@ -66,6 +67,30 @@ def main():
           idx["M) Push validated upstream merge"] > idx["K) Build signed universal APK"] > idx["I) Run JVM unit tests"])
     check("release after push",
           idx["N) Publish GitHub Release"] > idx["M) Push validated upstream merge"])
+
+    # 4b. Every build/release step must be gated by the computed do_build output.
+    build_phases = [s for s in steps if re.match(r"^([E-N])\)", s.get("name", ""))]
+    unconditional = [s.get("name") for s in build_phases
+                     if "steps.gate.outputs.do_build == 'true'" not in (s.get("if") or "")]
+    check("all build/release steps gated by do_build", not unconditional, str(unconditional))
+    gate = next((s for s in steps if s.get("name", "").startswith("C2) Gate")), None)
+    check("gate computes do_build", gate is not None and "do_build=" in gate.get("run", ""))
+    check("gate blocks sync-only conflict",
+          gate is not None and '$BLOCKED" = "true"' in gate.get("run", "") and '$CURRENT" != "true"' in gate.get("run", ""))
+    check("gate makes sync-only a dry-run",
+          gate is not None and '"sync-only"' in gate.get("run", "") and 'DO_BUILD="false"' in gate.get("run", ""))
+    outcome = next((s for s in steps if s.get("name", "").startswith("O) Outcome")), None)
+    check("outcome distinguishes blocked vs built",
+          outcome is not None and "Sync blocked" in outcome.get("run", "") and "built and released" in outcome.get("run", ""))
+    check("outcome reports job failure honestly",
+          outcome is not None and 'job.status' in outcome.get("run", "") and "FAILED" in outcome.get("run", ""))
+
+    # 4c. Previously-existing protections must still be present.
+    check("Arabic hooks validation present", "AppLanguage.ARABIC" in text and "AppLocale.wrap" in text)
+    check("conversation-scoped validation present",
+          "getConversationAssistant" in text and "resolveChatModel" in text)
+    check("APK artifact upload present", "actions/upload-artifact@v4" in text)
+    check("release publish + clobber present", "gh release create" in text and "--clobber" in text)
 
     # 5. Protected rules & invariants.
     check("ours-on-conflict rule present", bool(env.get("OURS_ON_CONFLICT")))
