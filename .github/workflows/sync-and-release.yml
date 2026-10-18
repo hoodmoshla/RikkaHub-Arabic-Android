@@ -360,7 +360,8 @@ jobs:
         run: |
           set -euo pipefail
           UPSTREAM_TAG=$(git describe --tags --match "[0-9]*" --abbrev=0 upstream/master 2>/dev/null || echo "2.5.1")
-          BASE_VERSION=$(echo "$UPSTREAM_TAG" | sed 's/^v//')
+          UPSTREAM_VERSION=$(git show upstream/master:app/build.gradle.kts | sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' | head -n 1)
+          BASE_VERSION="${UPSTREAM_VERSION:-${UPSTREAM_TAG#v}}"
           RUN_NUM="${{ github.run_number }}"
           LAST_RELEASE_TAG=$(gh release list --repo "$TARGET_REPO" --limit 1 --json tagName --jq '.[0].tagName // ""')
           LAST_RELEASE_CODE=0
