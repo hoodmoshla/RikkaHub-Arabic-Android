@@ -508,6 +508,15 @@ jobs:
           RELEASE_CODE: ${{ steps.version_step.outputs.release_code }}
         run: ./gradlew :app:assembleRelease -PreleaseVersion="$RELEASE_VERSION" -PreleaseCode="$RELEASE_CODE" -PreleaseSigned=true
 
+      - name: Upload APK artifact
+        id: upload_apk
+        if: steps.gate.outputs.do_build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: RikkaHub-Arabic-Release-APK
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
       # ---- L. Verify APK --------------------------------------------------------------
       - name: 'L) Verify generated APK integrity (signature + applicationId)'
         if: steps.gate.outputs.do_build == 'true'
@@ -530,7 +539,7 @@ jobs:
 
           SIGNATURE_REPORT=$(apksigner verify --print-certs "$apk_path")
           printf '%s\n' "$SIGNATURE_REPORT"
-          CERT_SHA=$(printf '%s\n' "$SIGNATURE_REPORT" | awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          CERT_SHA=$(printf '%s\n' "$SIGNATURE_REPORT" | awk -F': ' '/certificate SHA-256 digest:/ {print $2}' | tr -d ':' | tr '[:upper:]' '[:lower:]' | sort -u)
           EXPECTED_SHA="27326144bdee8eefa9cd7a39e80c3a5322e8332419b86d4b13cfecbbe9eb7b73"
           test "$CERT_SHA" = "$EXPECTED_SHA" || { echo "Certificate SHA-256 mismatch: got '$CERT_SHA'" >&2; exit 1; }
 
@@ -566,15 +575,6 @@ jobs:
       - name: 'M) Push validated upstream merge'
         if: steps.gate.outputs.do_build == 'true' && steps.merge.outputs.merged_upstream == 'true' && github.ref == 'refs/heads/master'
         run: git push origin HEAD:master
-
-      - name: Upload APK artifact
-        id: upload_apk
-        if: steps.gate.outputs.do_build == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: RikkaHub-Arabic-Release-APK
-          path: app/build/outputs/apk/release/*.apk
-          if-no-files-found: error
 
       # ---- N. Publish release ---------------------------------------------------------
       - name: 'N) Publish GitHub Release'
