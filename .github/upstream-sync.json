@@ -1,7 +1,16 @@
 {
   "_comment": "State for the Arabic upstream-sync workflow. Written only when an upstream merge is blocked by conflicts, so the 6-hourly schedule does not retry the same failing merge. Clearing 'blockedUpstream' (or running the workflow with force_sync=true) forces a new attempt.",
-  "blockedAt": null,
-  "blockedFiles": [],
-  "blockedUpstream": null,
+  "blockedAt": "2026-10-18T15:22:45.211526+00:00",
+  "blockedFiles": [
+    "app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ChatDrawer.kt",
+    "app/src/main/res/values-ar/strings.xml",
+    "app/src/main/res/values-ja/strings.xml",
+    "app/src/main/res/values-ko-rKR/strings.xml",
+    "app/src/main/res/values-ru/strings.xml",
+    "app/src/main/res/values-zh-rTW/strings.xml",
+    "app/src/main/res/values-zh/strings.xml",
+    "app/src/main/res/values/strings.xml"
+  ],
+  "blockedUpstream": "07b1238a8afa50da8de3dca1feac871d22721698",
   "lastReviewedUpstream": "55a108a4477fa308d6eacbe22ebf2fb0ceea1420"
 }
