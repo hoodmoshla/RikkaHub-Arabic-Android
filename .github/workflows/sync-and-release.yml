@@ -79,12 +79,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # ---- A. Checkout ----------------------------------------------------------------
-      # Only build-only dispatches check out their selected branch. Sync/push events keep
-      # operating on master; a review-branch build is never pushed to master.
-      - name: Checkout Arabic fork (master or build-only dispatch ref)
+      # Every manual mode uses the selected dispatch ref. Scheduled/push runs use master.
+      - name: Checkout Arabic fork (master or selected dispatch ref)
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'build-only' && github.ref_name || 'master' }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || 'master' }}
           fetch-depth: 0
           submodules: recursive
 
@@ -93,10 +92,26 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
+      - name: Set up Python for sync safety tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install sync test parser dependency
+        run: python -m pip install --disable-pip-version-check PyYAML
+
+      - name: Run static and real-git sync safety tests
+        run: |
+          python3 .github/scripts/test-sync-config.py
+          python3 .github/scripts/test-sync-behavior.py
+
       # ---- A. Fetch upstream (read-only) ---------------------------------------------
+      # Build-only is deliberately independent of the upstream remote and version tags.
       - name: 'A) Fetch upstream'
         id: fetch_upstream
+        if: github.event_name != 'workflow_dispatch' || inputs.mode != 'build-only'
         run: |
+          set -euo pipefail
           git remote add upstream "$UPSTREAM_REPO" || true
           git fetch upstream master --tags
 
@@ -114,105 +129,124 @@ jobs:
       # ---- B. Decide what this run should do -----------------------------------------
       - name: 'B) Decide phase (mode / blocked state)'
         id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_FORCE_BUILD: ${{ inputs.force_build }}
+          INPUT_FORCE_SYNC: ${{ inputs.force_sync }}
+          FETCH_HAS_NEW_UPSTREAM: ${{ steps.fetch_upstream.outputs.has_new_upstream }}
+          FETCH_UPSTREAM_SHA: ${{ steps.fetch_upstream.outputs.upstream_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
+          WORKFLOW_REF: ${{ github.ref }}
         run: |
-          IS_PUSH="${{ github.event_name == 'push' }}"
-          FORCE="${{ github.event.inputs.force_build == 'true' }}"
-          FORCE_SYNC="${{ github.event.inputs.force_sync == 'true' }}"
-          MODE="${{ github.event.inputs.mode }}"
-          [ -z "$MODE" ] && MODE="auto"
-          HAS_NEW="${{ steps.fetch_upstream.outputs.has_new_upstream }}"
-          UPSTREAM_SHA="${{ steps.fetch_upstream.outputs.upstream_sha }}"
+          set -euo pipefail
+          IS_PUSH=false
+          [ "$EVENT_NAME" = "push" ] && IS_PUSH=true || true
+          FORCE="${INPUT_FORCE_BUILD:-false}"
+          FORCE_SYNC="${INPUT_FORCE_SYNC:-false}"
+          MODE="${INPUT_MODE:-auto}"
+          HAS_NEW="${FETCH_HAS_NEW_UPSTREAM:-false}"
+          UPSTREAM_SHA="${FETCH_UPSTREAM_SHA:-}"
 
           BLOCKED_SHA=""
           if [ -f "$STATE_FILE" ]; then
-            BLOCKED_SHA=$(python3 -c "import json,sys;print(json.load(open('$STATE_FILE')).get('blockedUpstream',''))" 2>/dev/null || echo "")
+            BLOCKED_SHA=$(python3 -c "import json; print(json.load(open('$STATE_FILE')).get('blockedUpstream',''))" 2>/dev/null || echo "")
           fi
           echo "Blocked upstream SHA recorded previously: '${BLOCKED_SHA}'"
 
-          # Should we attempt an upstream merge?
-          SHOULD_SYNC="false"
-          if [ "$MODE" = "build-only" ]; then
-            echo "Mode=build-only: skipping the upstream merge."
-          elif [ "$HAS_NEW" != "true" ]; then
-            echo "No new upstream commits: nothing to sync."
-          elif [ -n "$BLOCKED_SHA" ] && [ "$BLOCKED_SHA" = "$UPSTREAM_SHA" ] && [ "$FORCE_SYNC" != "true" ]; then
-            echo "Upstream $UPSTREAM_SHA is recorded as blocked; not retrying the same merge (use force_sync=true to override)."
-          else
-            SHOULD_SYNC="true"
-          fi
-
-          # Did this push change anything other than CI/docs? A CI-only push must NOT publish
-          # an app release: a release is produced by a successful upstream sync or by an
-          # explicit build-only/force_build request.
-          APP_CHANGED="false"
-          if [ "$IS_PUSH" = "true" ]; then
-            BEFORE="${{ github.event.before }}"
-            AFTER="${{ github.event.after }}"
+          APP_CHANGED=false
+          CHANGED=""
+          if [ "$IS_PUSH" = true ]; then
+            BEFORE="${PUSH_BEFORE:-}"
+            AFTER="${PUSH_AFTER:-}"
             if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
                && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
               CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" 2>/dev/null || true)
-            else
+            elif [ -n "$AFTER" ] && git cat-file -e "$AFTER^{commit}" 2>/dev/null; then
               CHANGED=$(git diff-tree --no-commit-id --name-only -r "$AFTER" 2>/dev/null || true)
             fi
-            if printf '%s\n' "$CHANGED" | grep -vE '^(\.github/|docs/)|\.md$' | grep -q .; then
-              APP_CHANGED="true"
+            if printf '%s\n' "$CHANGED" | grep -vE '^(.github/|docs/)|\.md$' | grep -q .; then
+              APP_CHANGED=true
             fi
             echo "Push non-CI app changes: $APP_CHANGED"
             printf '%s\n' "$CHANGED" | sed 's/^/  changed: /'
           fi
 
-          # Build the checked-out ref only when explicitly requested or when the push really
-          # changed app code. (A clean upstream merge is handled later by the C2 gate.)
-          SHOULD_BUILD="false"
-          if [ "$FORCE" = "true" ] || [ "$MODE" = "build-only" ]; then
-            SHOULD_BUILD="true"
-          elif [ "$IS_PUSH" = "true" ] && [ "$APP_CHANGED" = "true" ]; then
-            SHOULD_BUILD="true"
+          SHOULD_SYNC=false
+          BLOCKED_CURRENT=false
+          if [ "$MODE" = "build-only" ]; then
+            echo "Mode=build-only: no upstream fetch or merge is needed."
+          elif [ "$IS_PUSH" = true ] && [ "$APP_CHANGED" != true ]; then
+            echo "CI/docs-only push: skip sync, build, and release."
+          elif [ "$HAS_NEW" = true ]; then
+            if [ -n "$BLOCKED_SHA" ] && [ "$BLOCKED_SHA" = "$UPSTREAM_SHA" ] && [ "$FORCE_SYNC" != true ]; then
+              BLOCKED_CURRENT=true
+              echo "Upstream $UPSTREAM_SHA is already blocked; force_sync=true is required to retry."
+            else
+              SHOULD_SYNC=true
+            fi
+          else
+            echo "No new upstream commits: nothing to sync."
+          fi
+
+          SHOULD_BUILD=false
+          if [ "$MODE" = "build-only" ] || [ "$FORCE" = true ]; then
+            SHOULD_BUILD=true
+          elif [ "$IS_PUSH" = true ] && [ "$APP_CHANGED" = true ]; then
+            SHOULD_BUILD=true
           fi
 
           echo "should_sync=$SHOULD_SYNC" >> "$GITHUB_OUTPUT"
           echo "should_build=$SHOULD_BUILD" >> "$GITHUB_OUTPUT"
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
-          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
-          ### Sync plan
-          | key | value |
-          | --- | --- |
-          | trigger | \`${{ github.event_name }}\` |
-          | mode | \`$MODE\` |
-          | upstream | \`$UPSTREAM_SHA\` |
-          | new upstream? | \`$HAS_NEW\` |
-          | app files changed by push? | \`$APP_CHANGED\` |
-          | previously blocked | \`${BLOCKED_SHA:-none}\` |
-          | will sync | \`$SHOULD_SYNC\` |
-          | will build | \`$SHOULD_BUILD\` |
-          EOF
+          echo "force_build=$FORCE" >> "$GITHUB_OUTPUT"
+          echo "app_changed=$APP_CHANGED" >> "$GITHUB_OUTPUT"
+          echo "upstream_blocked=$BLOCKED_CURRENT" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Sync plan"
+            echo "| key | value |"
+            echo "| --- | --- |"
+            echo "| trigger | \`$EVENT_NAME\` |"
+            echo "| mode | \`$MODE\` |"
+            echo "| upstream | \`${UPSTREAM_SHA:-not fetched}\` |"
+            echo "| new upstream? | \`$HAS_NEW\` |"
+            echo "| app files changed by push? | \`$APP_CHANGED\` |"
+            echo "| previously blocked | \`${BLOCKED_SHA:-none}\` |"
+            echo "| will sync | \`$SHOULD_SYNC\` |"
+            echo "| will build | \`$SHOULD_BUILD\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # ---- C. Merge on an isolated branch (never directly on master) -----------------
       - name: 'C) Attempt upstream merge (isolated branch)'
         id: merge
         if: steps.plan.outputs.should_sync == 'true'
+        env:
+          UPSTREAM_SHA: ${{ steps.fetch_upstream.outputs.upstream_sha }}
+          MODE: ${{ steps.plan.outputs.mode }}
         run: |
-          set -u
-          UPSTREAM_SHA="${{ steps.fetch_upstream.outputs.upstream_sha }}"
-          UPSTREAM_SHORT=$(git rev-parse --short upstream/master)
+          set -euo pipefail
+          UPSTREAM_SHORT=$(git rev-parse --short "$UPSTREAM_SHA")
           echo "merged_upstream=false" >> "$GITHUB_OUTPUT"
           echo "blocked=false" >> "$GITHUB_OUTPUT"
 
-          # Isolated working branch so a failed/aborted merge can never dirty master.
-          git switch -c sync/upstream-$UPSTREAM_SHORT
+          # Work only in an isolated branch; dry-run will abort without a local commit.
+          git switch -c "sync/upstream-$UPSTREAM_SHORT"
 
           if git merge upstream/master --no-commit --no-ff; then
+            if [ "$MODE" = "sync-only" ]; then
+              git merge --abort
+              echo "Sync-only dry run: clean merge candidate; no local commit was created."
+              echo "Clean merge candidate with upstream $UPSTREAM_SHORT (dry-run; not committed)." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
             git commit -m "chore(upstream): sync and merge upstream/master ($UPSTREAM_SHORT)"
             echo "merged_upstream=true" >> "$GITHUB_OUTPUT"
             echo "Clean merge with upstream $UPSTREAM_SHORT." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
-          # ---- Conflict path: never fail, never damage master ----
           echo "conflicted_files=$(git diff --name-only --diff-filter=U | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
-
-          # Documented automatic rule: our own CI files always win (upstream's CI targets
-          # the official repo). Everything else is manual.
           while IFS= read -r f; do
             [ -z "$f" ] && continue
             if printf '%s' "$f" | grep -Eq "$OURS_ON_CONFLICT"; then
@@ -223,73 +257,41 @@ jobs:
 
           REMAINING=$(git diff --name-only --diff-filter=U)
           if [ -z "$REMAINING" ]; then
+            if [ "$MODE" = "sync-only" ]; then
+              git merge --abort
+              echo "Sync-only dry run: conflict policy yielded a clean candidate; no local commit was created."
+              exit 0
+            fi
             git commit -m "chore(upstream): sync and merge upstream/master ($UPSTREAM_SHORT)"
             echo "merged_upstream=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           echo "blocked=true" >> "$GITHUB_OUTPUT"
-
-          # Human-readable, non-destructive report.
           {
-            echo "## ⚠️ Upstream sync blocked (human review required)"
+            echo "## Upstream sync blocked (human review required)"
             echo
             echo "**Upstream:** \`$UPSTREAM_SHA\` (\`$UPSTREAM_SHORT\`)"
             echo
-            echo "The following files conflict between the official RikkaHub and our Arabic"
-            echo "distribution and were **not** modified:"
+            echo "The following files conflict and were not modified:"
             echo
             echo '```'
             echo "$REMAINING"
             echo '```'
             echo
-            echo "**Protected (never auto-resolved) matches:**"
-            echo
+            echo "**Protected matches:**"
             echo '```'
             echo "$REMAINING" | grep -E "$PROTECTED_PATTERNS" || echo "(none)"
             echo '```'
             echo
-            echo "Nothing was pushed; master is unchanged. Resolve these files manually (keep the"
-            echo "Arabic/RTL/DB/updater changes) then re-run this workflow, or run it with"
-            echo "\`mode=build-only\` to publish an Arabic release from the current master."
+            echo "Nothing was pushed; the merge was aborted."
           } >> "$GITHUB_STEP_SUMMARY"
-
-          # Detailed per-file diff context for the artifact.
           mkdir -p sync-report
-          echo "$REMAINING" > sync-report/conflicted-files.txt
+          printf '%s\n' "$REMAINING" > sync-report/conflicted-files.txt
           git diff -U0 >> sync-report/conflict-details.diff 2>&1 || true
-
-          # Drop the conflict state BEFORE writing the state file: `git merge --abort` is a
-          # reset of tracked files, so it would otherwise revert the state file we just wrote.
           git merge --abort || true
-
-          # Record the blocked SHA so the 6-hourly schedule does not retry the same merge.
-          python3 - "$UPSTREAM_SHA" "$REMAINING" <<'PY'
-          import json, os, sys, datetime
-          sha, files = sys.argv[1], sys.argv[2].split("\n")
-          path = os.environ["STATE_FILE"]
-          state = {}
-          if os.path.exists(path):
-              try:
-                  state = json.load(open(path))
-              except Exception:
-                  state = {}
-          state["blockedUpstream"] = sha
-          state["blockedFiles"] = [f for f in files if f]
-          state["blockedAt"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-          json.dump(state, open(path, "w"), indent=2, sort_keys=True)
-          open(path, "a").write("\n")
-          PY
-          git add "$STATE_FILE"
-          if ! git diff --cached --quiet; then
-            git commit -m "chore(sync): record blocked upstream $UPSTREAM_SHORT [skip ci]"
-            if [ "${{ github.ref }}" = "refs/heads/master" ]; then
-              git push origin HEAD:master
-            else
-              echo "Blocked SHA state was not pushed: this run was dispatched from $GITHUB_REF_NAME, not master."
-            fi
-          fi
-          echo "Master left unchanged (conflicts isolated); blocker recorded for $UPSTREAM_SHORT."
+          echo "blocked_upstream_sha=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
+          echo "Master left unchanged (conflicts isolated); no state was written by the merge step."
 
       - name: Upload sync conflict report
         if: steps.merge.outputs.blocked == 'true'
@@ -298,43 +300,99 @@ jobs:
           name: upstream-sync-report
           path: sync-report/
 
-      # ---- C2. Gate: decide whether this run may build/release -----------------------
-      # A blocked sync must never lead to a build *caused by* the sync, but an explicit
-      # push/force/build-only must still be able to build the selected checkout.
+      # State writes are intentionally separate and production-only. Dry-run never reaches this.
+      - name: 'C1) Record blocked upstream state'
+        id: record_blocked
+        if: success() && steps.plan.outputs.mode == 'auto' && github.ref == 'refs/heads/master' && steps.merge.outputs.blocked == 'true'
+        env:
+          MODE: ${{ steps.plan.outputs.mode }}
+          WORKFLOW_REF: ${{ github.ref }}
+          JOB_STATUS: ${{ job.status }}
+          UPSTREAM_SHA: ${{ steps.merge.outputs.blocked_upstream_sha }}
+        run: |
+          set -euo pipefail
+          test "$MODE" = auto
+          test "$WORKFLOW_REF" = refs/heads/master
+          test "$JOB_STATUS" = success
+          test -n "$UPSTREAM_SHA"
+          python3 - "$UPSTREAM_SHA" <<'PY'
+          import json, os, sys, datetime
+          sha = sys.argv[1]
+          path = os.environ["STATE_FILE"]
+          with open("sync-report/conflicted-files.txt") as f:
+              files = [line.strip() for line in f if line.strip()]
+          try:
+              with open(path) as f:
+                  state = json.load(f)
+          except (FileNotFoundError, json.JSONDecodeError):
+              state = {}
+          state["blockedUpstream"] = sha
+          state["blockedFiles"] = files
+          state["blockedAt"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+          with open(path, "w") as f:
+              json.dump(state, f, indent=2, sort_keys=True)
+              f.write("\n")
+          PY
+          git add "$STATE_FILE"
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(sync): record blocked upstream $(git rev-parse --short "$UPSTREAM_SHA") [skip ci]"
+            test "$MODE" = auto && test "$WORKFLOW_REF" = refs/heads/master && test "$JOB_STATUS" = success
+            git push origin HEAD:master
+          fi
+
+      # ---- C2. Gate: runs only if all prior steps succeeded ---------------------------
       - name: 'C2) Gate build/release'
         id: gate
-        if: always()
+        if: success()
+        env:
+          BLOCKED: ${{ steps.merge.outputs.blocked == 'true' || steps.plan.outputs.upstream_blocked == 'true' }}
+          MERGED: ${{ steps.merge.outputs.merged_upstream }}
+          CURRENT: ${{ steps.plan.outputs.should_build }}
+          MODE: ${{ steps.plan.outputs.mode }}
+          FORCE_BUILD: ${{ steps.plan.outputs.force_build }}
+          APP_CHANGED: ${{ steps.plan.outputs.app_changed }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_REF: ${{ github.ref }}
+          INPUT_PUBLISH_RELEASE: ${{ inputs.publish_release }}
         run: |
-          BLOCKED="${{ steps.merge.outputs.blocked }}"
-          MERGED="${{ steps.merge.outputs.merged_upstream }}"
-          CURRENT="${{ steps.plan.outputs.should_build }}"
-          MODE="${{ steps.plan.outputs.mode }}"
-          DO_BUILD="false"
-          DO_PUBLISH="false"
-          if [ "$MODE" = "sync-only" ]; then
-            DO_BUILD="false"       # sync-only is a dry-run: never build/push/release
-          elif [ "$CURRENT" = "true" ]; then
-            DO_BUILD="true"        # push / force / build-only: build selected checkout
-          elif [ "$MERGED" = "true" ]; then
-            DO_BUILD="true"        # clean upstream merge: build & release the merged commit
+          set -euo pipefail
+          BLOCKED="${BLOCKED:-false}"
+          MERGED="${MERGED:-false}"
+          CURRENT="${CURRENT:-false}"
+          MODE="${MODE:-auto}"
+          FORCE_BUILD="${FORCE_BUILD:-false}"
+          APP_CHANGED="${APP_CHANGED:-false}"
+          DO_BUILD=false
+          DO_PUBLISH=false
+          if [ "$MODE" = sync-only ]; then
+            DO_BUILD=false
+          elif [ "$MODE" = build-only ]; then
+            DO_BUILD=true
+          elif [ "$BLOCKED" = true ]; then
+            # A blocked automatic sync may only proceed on an explicit force_build.
+            [ "$FORCE_BUILD" = true ] && DO_BUILD=true
+          elif [ "$EVENT_NAME" = push ] && [ "$APP_CHANGED" != true ]; then
+            DO_BUILD=false
+          elif [ "$CURRENT" = true ] || [ "$MERGED" = true ]; then
+            DO_BUILD=true
           fi
-          if [ "$BLOCKED" = "true" ] && [ "$CURRENT" != "true" ]; then
-            DO_BUILD="false"       # blocked sync with no explicit build request -> no release
-          fi
-          PUBLISH_REQUESTED="${{ github.event_name == 'workflow_dispatch' && inputs.publish_release == true && github.ref == 'refs/heads/master' }}"
-          if [ "$PUBLISH_REQUESTED" = "true" ] && [ "$DO_BUILD" = "true" ]; then
-            DO_PUBLISH="true"
+          if [ "$DO_BUILD" = true ] && [ "$EVENT_NAME" = workflow_dispatch ] \
+             && [ "${INPUT_PUBLISH_RELEASE:-false}" = true ] \
+             && [ "$WORKFLOW_REF" = refs/heads/master ]; then
+            DO_PUBLISH=true
           fi
           echo "do_build=$DO_BUILD" >> "$GITHUB_OUTPUT"
           echo "publish_release=$DO_PUBLISH" >> "$GITHUB_OUTPUT"
-          echo "gate: mode=$MODE merged=$MERGED blocked=$BLOCKED build_current=$CURRENT -> do_build=$DO_BUILD publish_release=$DO_PUBLISH"
+          echo "gate: mode=$MODE merged=$MERGED blocked=$BLOCKED force_build=$FORCE_BUILD -> do_build=$DO_BUILD publish_release=$DO_PUBLISH"
 
       # ---- D. Hard invariant: the built commit must contain upstream -----------------
       - name: 'D) Verify official upstream is contained'
         id: upstream_check
-        if: steps.gate.outputs.do_build == 'true'
+        if: steps.gate.outputs.do_build == 'true' && steps.plan.outputs.mode != 'build-only'
+        env:
+          MERGED_UPSTREAM: ${{ steps.merge.outputs.merged_upstream }}
         run: |
-          if [ "${{ steps.merge.outputs.merged_upstream }}" = "true" ]; then
+          if [ "${MERGED_UPSTREAM:-false}" = "true" ]; then
             if ! git merge-base --is-ancestor upstream/master HEAD; then
               echo "::error::upstream/master is NOT contained in the commit that would be built."
               exit 1
@@ -359,9 +417,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          UPSTREAM_TAG=$(git describe --tags --match "[0-9]*" --abbrev=0 upstream/master 2>/dev/null || echo "2.5.1")
-          UPSTREAM_VERSION=$(git show upstream/master:app/build.gradle.kts | sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' | head -n 1)
-          BASE_VERSION="${UPSTREAM_VERSION:-${UPSTREAM_TAG#v}}"
+          if [ "${{ steps.plan.outputs.mode }}" = build-only ]; then
+            BASE_VERSION=$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n 1)
+          else
+            UPSTREAM_TAG=$(git describe --tags --match "[0-9]*" --abbrev=0 upstream/master 2>/dev/null || echo "3.0.0")
+            UPSTREAM_VERSION=$(git show upstream/master:app/build.gradle.kts | sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' | head -n 1)
+            BASE_VERSION="${UPSTREAM_VERSION:-${UPSTREAM_TAG#v}}"
+          fi
           RUN_NUM="${{ github.run_number }}"
           LAST_RELEASE_TAG=$(gh release list --repo "$TARGET_REPO" --limit 1 --json tagName --jq '.[0].tagName // ""')
           LAST_RELEASE_CODE=0
@@ -560,7 +622,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p previous-apk
-          gh release download v2.5.6.124 --repo "$TARGET_REPO" --pattern app-universal-release.apk --dir previous-apk
+          gh release download v3.0.0.178 --repo "$TARGET_REPO" --pattern app-universal-release.apk --dir previous-apk
 
       - name: Verify signed in-place upgrade and launch
         if: steps.gate.outputs.do_build == 'true'
@@ -574,8 +636,17 @@ jobs:
 
       # ---- M. Push the validated merge (last, only after everything passed) -----------
       - name: 'M) Push validated upstream merge'
-        if: steps.gate.outputs.do_build == 'true' && steps.merge.outputs.merged_upstream == 'true' && github.ref == 'refs/heads/master'
-        run: git push origin HEAD:master
+        if: success() && steps.gate.outputs.do_build == 'true' && steps.merge.outputs.merged_upstream == 'true' && steps.plan.outputs.mode == 'auto' && github.ref == 'refs/heads/master'
+        env:
+          MODE: ${{ steps.plan.outputs.mode }}
+          WORKFLOW_REF: ${{ github.ref }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          test "$MODE" = auto
+          test "$WORKFLOW_REF" = refs/heads/master
+          test "$JOB_STATUS" = success
+          git push origin HEAD:master
 
       # ---- N. Publish release ---------------------------------------------------------
       - name: 'N) Publish GitHub Release'
