@@ -173,6 +173,11 @@ def main():
           ("reset --hard", "push --force", "push -f")))
     state = json.loads(STATE.read_text())
     check("state file valid JSON", "blockedUpstream" in state)
+    reviewed_sha = state.get("lastReviewedUpstream", "")
+    check("reviewed upstream SHA is a full commit contained in the checkout",
+          bool(re.fullmatch(r"[0-9a-f]{40}", reviewed_sha)) and
+          subprocess.run(["git", "merge-base", "--is-ancestor", reviewed_sha, "HEAD"],
+                         cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0)
 
     docs = (ROOT / ".github/SYNC.md").read_text()
     check("docs describe sync-only no commit/state/push", "لا ينشئ commit محليًا" in docs and
