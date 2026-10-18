@@ -1675,4 +1675,10 @@
   <string name="update_reason_not_newer">загруженная версия не новее установленной</string>
   <string name="update_reason_timeout">время ожидания подключения истекло</string>
   <string name="update_reason_unknown">неизвестная ошибка</string>
+
+  <string name="assistant_page_memory_auto_dream">Автосновидение</string>
+  <string name="assistant_page_memory_auto_dream_desc">Превращать чаты в воспоминания в фоновом режиме после паузы. Если выключено, это происходит только при нажатии «Запустить сновидение сейчас».</string>
+  <string name="chat_page_voice_waiting">Ожидание ответа; после этого прослушивание возобновится</string>
+  <string name="setting_display_page_voice_listen_while_replying_desc">Речь, пока модель отвечает, ставится в очередь и отправляется после. Отключите, чтобы приостанавливать микрофон до завершения ответа (и его озвучивания), для диалогов «вопрос — ответ».</string>
+  <string name="setting_display_page_voice_listen_while_replying_title">Продолжать слушать во время ответов в голосовом режиме</string>
 </resources>

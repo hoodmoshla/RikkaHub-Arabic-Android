@@ -1673,4 +1673,10 @@
   <string name="workspace_terminal_tab">الطرفية %1$d</string>
   <string name="workspace_terminal_title">الطرفية</string>
   <string name="workspace_terminal_title_with_name">%s · طرفية</string>
+
+  <string name="assistant_page_memory_auto_dream">حلم تلقائي</string>
+  <string name="assistant_page_memory_auto_dream_desc">حوّل المحادثات إلى ذكريات في الخلفية بمجرد توقفها. عند إيقاف هذا الخيار، لا يحدث ذلك إلا عند النقر على «احلم الآن».</string>
+  <string name="chat_page_voice_waiting">في انتظار الرد؛ سيستأنف الاستماع بعد ذلك</string>
+  <string name="setting_display_page_voice_listen_while_replying_desc">يُدرج الكلام الذي يُقال أثناء رد النموذج في قائمة انتظار ويُرسل بعد ذلك. أوقفه لإيقاف الميكروفون مؤقتًا حتى ينتهي الرد (ويُقرأ بصوت عالٍ)، من أجل محادثات سؤال واحد وجواب واحد.</string>
+  <string name="setting_display_page_voice_listen_while_replying_title">متابعة الاستماع أثناء الردود في الوضع الصوتي</string>
 </resources>

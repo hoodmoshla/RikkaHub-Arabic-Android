@@ -1675,4 +1675,10 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="update_reason_not_newer">下载的版本不高于已安装的版本</string>
   <string name="update_reason_timeout">连接超时</string>
   <string name="update_reason_unknown">未知错误</string>
+
+  <string name="assistant_page_memory_auto_dream">自动做梦</string>
+  <string name="assistant_page_memory_auto_dream_desc">聊天暂停后，在后台将聊天内容转为记忆。关闭后，仅在点击“立即做梦”时执行此操作</string>
+  <string name="chat_page_voice_waiting">等待回复，结束后继续聆听</string>
+  <string name="setting_display_page_voice_listen_while_replying_desc">模型回复期间说的话会加入队列，回复结束后自动发送。关闭后，回复（及朗读）结束前麦克风保持关闭，适合一问一答的对话</string>
+  <string name="setting_display_page_voice_listen_while_replying_title">语音模式回复时继续聆听</string>
 </resources>
