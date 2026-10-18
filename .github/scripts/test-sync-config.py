@@ -10,6 +10,7 @@ classification rule against representative paths.
 import json
 import re
 import sys
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -43,6 +44,21 @@ def main():
 
     steps = wf["jobs"]["pipeline"]["steps"]
     names = [s.get("name", "") for s in steps]
+
+    # Execute the actual workflow parser, including the modern "V2 Signer:" prefix.
+    integrity = next(s for s in steps if s.get("name", "").startswith("L) Verify generated APK integrity"))
+    parser_line = next(line.strip() for line in integrity["run"].splitlines() if line.strip().startswith("CERT_SHA=$("))
+    parser = parser_line[len("CERT_SHA=$("):-1]
+    expected_cert = "27326144bdee8eefa9cd7a39e80c3a5322e8332419b86d4b13cfecbbe9eb7b73"
+    for label, report in {
+        "legacy": f"Signer #1 certificate SHA-256 digest: {expected_cert}",
+        "modern": f"V2 Signer: certificate SHA-256 digest: {expected_cert}",
+        "same signer in two schemes": f"V2 Signer: certificate SHA-256 digest: {expected_cert}\nV3 Signer: certificate SHA-256 digest: {expected_cert}",
+    }.items():
+        actual = subprocess.check_output(["bash", "-euo", "pipefail", "-c", parser],
+                                         env={"SIGNATURE_REPORT": report, "PATH": "/usr/bin:/bin"}, text=True).strip()
+        check(f"certificate parser supports {label}", actual == expected_cert)
+
 
     # 2. Phase isolation: fetch, decide, merge, verify, build, tests, push, optional release.
     for phase in ("A) Fetch upstream", "B) Decide phase", "C) Attempt upstream merge",
