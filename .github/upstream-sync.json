@@ -1,8 +1,9 @@
 {
   "_comment": "State for the Arabic upstream-sync workflow. Written only when an upstream merge is blocked by conflicts, so the 6-hourly schedule does not retry the same failing merge. Clearing 'blockedUpstream' (or running the workflow with force_sync=true) forces a new attempt.",
-  "blockedAt": "2026-10-18T08:37:46.745724+00:00",
+  "blockedAt": "2026-10-18T10:31:47.156407+00:00",
   "blockedFiles": [
     ".github/workflows/daily-build.yml",
+    "app/build.gradle.kts",
     "app/schemas/me.rerere.rikkahub.data.db.AppDatabase/26.json",
     "app/src/main/java/me/rerere/rikkahub/RikkaHubApp.kt",
     "app/src/main/java/me/rerere/rikkahub/data/datastore/PreferencesStore.kt",
@@ -30,7 +31,10 @@
     "app/src/main/java/me/rerere/rikkahub/web/dto/WebDto.kt",
     "app/src/main/java/me/rerere/rikkahub/web/routes/ConversationDiff.kt",
     "app/src/main/res/values-ar/strings.xml",
-    "app/src/main/res/values/strings.xml"
+    "app/src/main/res/values/strings.xml",
+    "app/src/release/generated/baselineProfiles/baseline-prof.txt",
+    "app/src/release/generated/baselineProfiles/startup-prof.txt",
+    "gradle/libs.versions.toml"
   ],
-  "blockedUpstream": "c5ea8f419d959513b02b4a132699deb566a451a3"
+  "blockedUpstream": "55a108a4477fa308d6eacbe22ebf2fb0ceea1420"
 }
