@@ -1675,4 +1675,10 @@ mDNSアドレス: .localホスト名を使用し、IPを知らなくても同じ
   <string name="update_reason_not_newer">ダウンロードしたバージョンはインストール済みのバージョンより新しくありません</string>
   <string name="update_reason_timeout">接続がタイムアウトしました</string>
   <string name="update_reason_unknown">不明なエラー</string>
+
+  <string name="assistant_page_memory_auto_dream">自動で夢を見る</string>
+  <string name="assistant_page_memory_auto_dream_desc">チャットが停止すると、バックグラウンドで記憶に変換されます。オフの場合、これは「今すぐ夢を見る」をタップしたときにのみ実行されます。</string>
+  <string name="chat_page_voice_waiting">応答を待機中です。終了後に聞き取りを再開します</string>
+  <string name="setting_display_page_voice_listen_while_replying_desc">モデルが応答している間の音声はキューに追加され、後で送信されます。オフにすると、応答が終了して読み上げられるまでマイクが一時停止され、一問一答の会話になります。</string>
+  <string name="setting_display_page_voice_listen_while_replying_title">音声モードで応答中も聞き取りを続ける</string>
 </resources>

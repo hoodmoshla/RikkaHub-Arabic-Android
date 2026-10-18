@@ -1671,4 +1671,10 @@
   <string name="workspace_terminal_tab">Terminal %1$d</string>
   <string name="workspace_terminal_title">Terminal</string>
   <string name="workspace_terminal_title_with_name">%s · Terminal</string>
+
+  <string name="assistant_page_memory_auto_dream">Auto dream</string>
+  <string name="assistant_page_memory_auto_dream_desc">Turn chats into memories in the background once they pause. When off, this only happens when you tap Dream now</string>
+  <string name="chat_page_voice_waiting">Waiting for the reply; listening will resume afterward</string>
+  <string name="setting_display_page_voice_listen_while_replying_desc">Speech while the model is replying is queued and sent afterward. Turn off to pause the microphone until the reply finishes (and is read aloud), for one-question-one-answer conversations.</string>
+  <string name="setting_display_page_voice_listen_while_replying_title">Keep listening during replies in voice mode</string>
 </resources>
