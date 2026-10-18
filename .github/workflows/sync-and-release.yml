@@ -634,6 +634,69 @@ jobs:
           disable-animations: true
           script: bash .github/scripts/verify-apk-upgrade.sh
 
+      # A clean candidate that fails validation is terminally blocked by a separate
+      # state-only commit based on freshly fetched origin/master; never push this run's HEAD.
+      - name: 'P3) Record validation failure (state only)'
+        if: failure() && steps.merge.outputs.merged_upstream == 'true' && steps.gate.outputs.do_build == 'true' && steps.plan.outputs.mode == 'auto' && github.ref == 'refs/heads/master'
+        env:
+          MODE: ${{ steps.plan.outputs.mode }}
+          WORKFLOW_REF: ${{ github.ref }}
+          JOB_STATUS: ${{ job.status }}
+          MERGED_UPSTREAM: ${{ steps.merge.outputs.merged_upstream }}
+          DO_BUILD: ${{ steps.gate.outputs.do_build }}
+          UPSTREAM_SHA: ${{ steps.fetch_upstream.outputs.upstream_sha }}
+        run: |
+          set -euo pipefail
+          # Refuse out-of-scope invocations before fetching, creating a worktree, or writing.
+          test "$MODE" = auto
+          test "$WORKFLOW_REF" = refs/heads/master
+          test "$JOB_STATUS" = failure
+          test "$MERGED_UPSTREAM" = true
+          test "$DO_BUILD" = true
+          [[ "$UPSTREAM_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          git fetch origin master:refs/remotes/origin/master
+          MASTER_SHA=$(git rev-parse refs/remotes/origin/master)
+          if git merge-base --is-ancestor "$UPSTREAM_SHA" "$MASTER_SHA"; then
+            echo "Upstream is already contained in origin/master; no stale blocked state was written."
+            exit 0
+          fi
+
+          WORKTREE_ROOT=$(mktemp -d "${RUNNER_TEMP:-/tmp}/sync-validation-state.XXXXXX")
+          STATE_WT="$WORKTREE_ROOT/state"
+          cleanup() {
+            git worktree remove "$STATE_WT" >/dev/null 2>&1 || true
+            rmdir "$WORKTREE_ROOT" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          git worktree add --detach "$STATE_WT" "$MASTER_SHA"
+          mkdir -p "$STATE_WT/$(dirname "$STATE_FILE")"
+          python3 - "$STATE_WT/$STATE_FILE" "$UPSTREAM_SHA" <<'PY'
+          import datetime, json, sys
+          path, sha = sys.argv[1:]
+          try:
+              with open(path) as f:
+                  state = json.load(f)
+          except (FileNotFoundError, json.JSONDecodeError):
+              state = {}
+          state["blockedUpstream"] = sha
+          state["blockedStage"] = "validation"
+          state["blockedFiles"] = []
+          state["reason"] = "Validation failed after a clean upstream merge and requested build."
+          state["blockedAt"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+          with open(path, "w") as f:
+              json.dump(state, f, indent=2, sort_keys=True)
+              f.write("\n")
+          PY
+          git -C "$STATE_WT" add -- "$STATE_FILE"
+          STAGED=$(git -C "$STATE_WT" diff --cached --name-only)
+          test "$STAGED" = "$STATE_FILE"
+          if ! git -C "$STATE_WT" diff --cached --quiet; then
+            git -C "$STATE_WT" commit -m "chore(sync): block validation-failed upstream $(git rev-parse --short "$UPSTREAM_SHA") [skip ci]"
+            test "$MODE" = auto && test "$WORKFLOW_REF" = refs/heads/master && test "$JOB_STATUS" = failure
+            git -C "$STATE_WT" push origin HEAD:master
+          fi
+
       # ---- M. Push the validated merge (last, only after everything passed) -----------
       - name: 'M) Push validated upstream merge'
         if: success() && steps.gate.outputs.do_build == 'true' && steps.merge.outputs.merged_upstream == 'true' && steps.plan.outputs.mode == 'auto' && github.ref == 'refs/heads/master'
