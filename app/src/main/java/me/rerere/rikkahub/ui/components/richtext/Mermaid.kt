@@ -20,25 +20,26 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import com.dokar.sonner.ToastType
+import me.rerere.ui.toast.ToastType
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Download01
 import me.rerere.hugeicons.stroke.View
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
-import me.rerere.rikkahub.ui.components.webview.WEB_VIEW_ASSET_URL
-import me.rerere.rikkahub.ui.components.webview.WEB_VIEW_BASE_URL
-import me.rerere.rikkahub.ui.components.webview.WebView
-import me.rerere.rikkahub.ui.components.webview.WebViewContentCache
-import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import me.rerere.rikkahub.utils.escapeHtml
 import me.rerere.rikkahub.utils.exportImage
 import me.rerere.rikkahub.utils.toCssHex
+import me.rerere.ui.webview.WEB_VIEW_ASSET_URL
+import me.rerere.ui.webview.WEB_VIEW_BASE_URL
+import me.rerere.ui.webview.WebView
+import me.rerere.ui.webview.WebViewContentCache
+import me.rerere.ui.webview.rememberWebViewState
 
 @Composable
 fun Mermaid(
@@ -48,6 +49,7 @@ fun Mermaid(
     val colorScheme = MaterialTheme.colorScheme
     val darkMode = LocalDarkMode.current
     val context = LocalContext.current
+    val resources = LocalResources.current
     val activity = LocalActivity.current
     val toaster = LocalToaster.current
     val navController = LocalNavController.current
@@ -71,13 +73,13 @@ fun Mermaid(
                         }
                     }
                     toaster.show(
-                        context.getString(R.string.mermaid_export_success),
+                        resources.getString(R.string.mermaid_export_success),
                         type = ToastType.Success
                     )
                 }.onFailure {
                     it.printStackTrace()
                     toaster.show(
-                        context.getString(R.string.mermaid_export_failed),
+                        resources.getString(R.string.mermaid_export_failed),
                         type = ToastType.Error
                     )
                 }

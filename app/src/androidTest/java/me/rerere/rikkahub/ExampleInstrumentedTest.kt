@@ -17,6 +17,7 @@ class ExampleInstrumentedTest {
     fun useAppContext() {
         // Context of the app under test.
         val appContext = InstrumentationRegistry.getInstrumentation().targetContext
-        assertEquals("me.rerere.rikkahub", appContext.packageName)
+        // The instrumented target is the Arabic Debug variant, not upstream.
+        assertEquals("me.rerere.rikkahub.arabic.dev.debug", appContext.packageName)
     }
 }

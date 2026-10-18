@@ -4,12 +4,13 @@
 Run: python3 .github/scripts/test-sync-config.py
 
 These are *config* checks (no network, no Android build): they lock the invariants that
-must never regress in the sync/release pipeline, and they exercise the documented conflict
-classification rule against a representative set of paths.
+must never regress in the sync/build pipeline, and exercise the documented conflict
+classification rule against representative paths.
 """
 import json
 import re
 import sys
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -34,21 +35,38 @@ def main():
     text = WF.read_text()
     wf = yaml.safe_load(text)
     env = wf.get("env", {})
+    triggers = wf.get(True, wf.get("on", {}))
 
     # 1. YAML parses and has the expected structure.
     check("workflow parses", isinstance(wf, dict))
     check("triggers on push/schedule/workflow_dispatch",
-          all(k in wf.get(True, wf.get("on", {})) for k in ("push", "schedule", "workflow_dispatch")))
+          all(k in triggers for k in ("push", "schedule", "workflow_dispatch")))
 
     steps = wf["jobs"]["pipeline"]["steps"]
     names = [s.get("name", "") for s in steps]
 
-    # 2. Phase isolation: fetch, decide, merge, verify, build, push, release.
+    # Execute the actual workflow parser, including the modern "V2 Signer:" prefix.
+    integrity = next(s for s in steps if s.get("name", "").startswith("L) Verify generated APK integrity"))
+    parser_line = next(line.strip() for line in integrity["run"].splitlines() if line.strip().startswith("CERT_SHA=$("))
+    parser = parser_line[len("CERT_SHA=$("):-1]
+    expected_cert = "27326144bdee8eefa9cd7a39e80c3a5322e8332419b86d4b13cfecbbe9eb7b73"
+    for label, report in {
+        "legacy": f"Signer #1 certificate SHA-256 digest: {expected_cert}",
+        "modern": f"V2 Signer: certificate SHA-256 digest: {expected_cert}",
+        "same signer in two schemes": f"V2 Signer: certificate SHA-256 digest: {expected_cert}\nV3 Signer: certificate SHA-256 digest: {expected_cert}",
+    }.items():
+        actual = subprocess.check_output(["bash", "-euo", "pipefail", "-c", parser],
+                                         env={"SIGNATURE_REPORT": report, "PATH": "/usr/bin:/bin"}, text=True).strip()
+        check(f"certificate parser supports {label}", actual == expected_cert)
+
+
+    # 2. Phase isolation: fetch, decide, merge, verify, build, tests, push, optional release.
     for phase in ("A) Fetch upstream", "B) Decide phase", "C) Attempt upstream merge",
                   "C2) Gate build/release",
                   "D) Verify official upstream is contained", "E) Determine Release Version",
                   "F) Validate Arabic resource completeness", "G) Validate Arabic integration hooks",
-                  "I) Run JVM unit tests", "J) Restore signing key", "K) Build signed universal APK",
+                  "I) Run app JVM unit tests", "I2) Run lintRelease",
+                  "I3) Run Room instrumentation tests", "J) Restore signing key", "K) Build signed universal APK",
                   "L) Verify generated APK integrity", "M) Push validated upstream merge",
                   "N) Publish GitHub Release", "O) Outcome"):
         check(f"phase present: {phase}", any(n.startswith(phase) for n in names))
@@ -60,13 +78,19 @@ def main():
     check("merge aborts cleanly on conflict (no exit 1)", "exit 1" not in merge_run)
     check("merge records blocked SHA state", "blockedUpstream" in merge_run)
     check("state commit is [skip ci]", "[skip ci]" in merge_run)
+    check("blocked-state push is restricted to master ref",
+          'github.ref }}" = "refs/heads/master"' in merge_run and "git push origin HEAD:master" in merge_run)
 
     # 4. Push/release happen only after the build+verify phases.
-    idx = {n: i for i, n in enumerate(names)}
-    check("push after build+verify",
-          idx["M) Push validated upstream merge"] > idx["K) Build signed universal APK"] > idx["I) Run JVM unit tests"])
+    def phase_index(prefix):
+        return next(i for i, name in enumerate(names) if name.startswith(prefix))
+
+    check("push after all checks and APK verification",
+          phase_index("M) Push validated upstream merge") > phase_index("L) Verify generated APK integrity") >
+          phase_index("K) Build signed universal APK") > phase_index("I3) Run Room instrumentation tests") >
+          phase_index("I2) Run lintRelease") > phase_index("I) Run app JVM unit tests"))
     check("release after push",
-          idx["N) Publish GitHub Release"] > idx["M) Push validated upstream merge"])
+          phase_index("N) Publish GitHub Release") > phase_index("M) Push validated upstream merge"))
 
     # 4b. Every build/release step must be gated by the computed do_build output.
     build_phases = [s for s in steps if re.match(r"^([E-N])\)", s.get("name", ""))]
@@ -80,10 +104,12 @@ def main():
     check("gate makes sync-only a dry-run",
           gate is not None and '"sync-only"' in gate.get("run", "") and 'DO_BUILD="false"' in gate.get("run", ""))
     outcome = next((s for s in steps if s.get("name", "").startswith("O) Outcome")), None)
-    check("outcome distinguishes blocked vs built",
-          outcome is not None and "Sync blocked" in outcome.get("run", "") and "built and released" in outcome.get("run", ""))
+    check("outcome distinguishes staged from released",
+          outcome is not None and "built and staged" in outcome.get("run", "") and
+          "built and released" in outcome.get("run", ""))
     check("outcome reports job failure honestly",
-          outcome is not None and 'job.status' in outcome.get("run", "") and "FAILED" in outcome.get("run", ""))
+          outcome is not None and 'job.status' in outcome.get("run", "") and
+          "APK file present" in outcome.get("run", "") and "No claim is made" in outcome.get("run", ""))
 
     # 4d. A CI-only push must not publish an app release.
     check("CI-only push does not trigger a build",
@@ -104,16 +130,57 @@ def main():
         got = plan_build(*args)
         check(f"plan build: {name}", got == exp, f"got={got}")
 
-    # 4c. Previously-existing protections must still be present.    check("Arabic hooks validation present", "AppLanguage.ARABIC" in text and "AppLocale.wrap" in text)
+    # 4c. Previously-existing protections must still be present.
+    check("Arabic hooks validation present", "AppLanguage.ARABIC" in text and "AppLocale.wrap" in text)
     check("conversation-scoped validation present",
           "getConversationAssistant" in text and "resolveChatModel" in text)
     check("APK artifact upload present", "actions/upload-artifact@v4" in text)
-    check("release publish + clobber present", "gh release create" in text and "--clobber" in text)
+    release = next((s for s in steps if s.get("name", "").startswith("N) Publish GitHub Release")), None)
+    release_if = release.get("if", "") if release else ""
+    check("publish_release input defaults false",
+          triggers["workflow_dispatch"]["inputs"]["publish_release"].get("default") is False)
+    check("public release requires explicit dispatch on master",
+          release is not None and "steps.gate.outputs.publish_release == 'true'" in release_if and
+          "steps.gate.outputs.do_build == 'true'" in release_if and
+          "github.event_name == 'workflow_dispatch'" in text and
+          "inputs.publish_release == true" in text and "github.ref == 'refs/heads/master'" in text)
+    check("release has no clobber fallback and refuses tag reuse",
+          "gh release create" in text and "--clobber" not in text and
+          "gh release upload" not in text and "Refusing to reuse existing tag" in text)
+    checkout = next((s for s in steps if s.get("name", "").startswith("Checkout Arabic fork")), None)
+    check("build-only dispatch checks out selected ref",
+          checkout is not None and "inputs.mode == 'build-only'" in checkout["with"].get("ref", "") and
+          "github.ref_name" in checkout["with"].get("ref", ""))
+    push = next((s for s in steps if s.get("name", "").startswith("M) Push validated")), None)
+    check("validated merge push is restricted to master ref",
+          push is not None and "github.ref == 'refs/heads/master'" in push.get("if", ""))
+    check("latest release gates a monotonic versionCode",
+          "gh release list" in text and "LAST_RELEASE_CODE" in text and "LAST_RELEASE_CODE + 1" in text)
+    check("official APK tools validate signature and manifest metadata",
+          "apksigner verify --print-certs" in text and "aapt dump badging" in text and
+          "EXPECTED_VERSION_NAME" in text and "EXPECTED_VERSION_CODE" in text)
+    check("APK verification uses configured release certificate",
+          "27326144bdee8eefa9cd7a39e80c3a5322e8332419b86d4b13cfecbbe9eb7b73" in text)
+    check("app JVM tests target available debug test task",
+          "./gradlew :app:testDebugUnitTest --no-daemon" in text and "./gradlew test --no-daemon" not in text)
+    check("lint and Room emulator instrumentation checks are configured",
+          ":app:lintRelease" in text and "reactivecircus/android-emulator-runner@v2" in text and
+          "api-level: 35" in text and "arch: x86_64" in text and "/dev/kvm" in text and
+          ":app:connectedDebugAndroidTest" in text)
+    report_upload = next((s for s in steps if s.get("name", "").startswith("Upload test and lint reports")), None)
+    check("test and lint reports upload always",
+          report_upload is not None and report_upload.get("if") == "always()" and
+          "**/build/test-results/" in report_upload.get("with", {}).get("path", "") and
+          "app/build/reports/lint-results-release.html" in report_upload.get("with", {}).get("path", ""))
+    check("library unit tests remain covered", all(f":{module}:test" in text for module in
+          ("ai", "common", "document", "highlight", "material3", "mediagen", "oauth", "search", "speech", "ui", "web", "workspace")))
+    check("signed in-place upgrade is exercised", "verify-apk-upgrade.sh" in text and
+          "Fetch previous Arabic APK" in text and "upgrade-verification/" in text)
 
     # 5. Protected rules & invariants.
     check("ours-on-conflict rule present", bool(env.get("OURS_ON_CONFLICT")))
     check("protected patterns present", bool(env.get("PROTECTED_PATTERNS")))
-    check("signing SHA locked", "27:32:61:44:BD:EE:8E:EF:A9:CD:7A:39:E8:0C:3A:53:22:E8:33:24:19:B8:6D:4B:13:CF:EC:BB:E9:EB:7B:73" in text)
+    check("signing SHA locked", "27326144bdee8eefa9cd7a39e80c3a5322e8332419b86d4b13cfecbbe9eb7b73" in text)
     check("applicationId locked", "me.rerere.rikkahub.arabic.dev" in text)
     check("no destructive git commands",
           not any(bad in text for bad in ("reset --hard", "push --force", "push -f")))

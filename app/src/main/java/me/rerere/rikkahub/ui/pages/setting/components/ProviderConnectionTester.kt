@@ -29,11 +29,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderManager
@@ -58,6 +60,7 @@ fun ProviderConnectionTester(
     val providerManager = koinInject<ProviderManager>()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val resources = LocalResources.current
 
     IconButton(onClick = { showTestDialog = true }) {
         Icon(HugeIcons.Connect, null)
@@ -138,7 +141,8 @@ fun ProviderConnectionTester(
                                         params = TextGenerationParams(
                                             model = model!!,
                                             customHeaders = model!!.customHeaders,
-                                            customBody = model!!.customBodies
+                                            customBody = model!!.customBodies,
+                                            reasoningLevel = ReasoningLevel.AUTO
                                         )
                                     )
                                     val text = result.message.parts
@@ -159,7 +163,8 @@ fun ProviderConnectionTester(
                                         params = TextGenerationParams(
                                             model = model!!,
                                             customHeaders = model!!.customHeaders,
-                                            customBody = model!!.customBodies
+                                            customBody = model!!.customBodies,
+                                            reasoningLevel = ReasoningLevel.AUTO
                                         )
                                     )
                                     flow.collect { chunk ->
@@ -188,7 +193,8 @@ fun ProviderConnectionTester(
                                             model = model!!,
                                             tools = listOf(testTool),
                                             customHeaders = model!!.customHeaders,
-                                            customBody = model!!.customBodies
+                                            customBody = model!!.customBodies,
+                                            reasoningLevel = ReasoningLevel.AUTO
                                         )
                                     )
                                     val message = result.message
@@ -196,7 +202,7 @@ fun ProviderConnectionTester(
                                         .filterIsInstance<UIMessagePart.Tool>()
                                         .firstOrNull()
                                     val resultText = if (toolCall != null) {
-                                        context.getString(
+                                        resources.getString(
                                             R.string.setting_provider_page_test_tool_called,
                                             toolCall.toolName,
                                             toolCall.input
@@ -205,7 +211,7 @@ fun ProviderConnectionTester(
                                         val text = message.parts
                                             .filterIsInstance<UIMessagePart.Text>()
                                             .joinToString("") { it.text }
-                                        context.getString(
+                                        resources.getString(
                                             R.string.setting_provider_page_test_tool_not_called,
                                             text
                                         )

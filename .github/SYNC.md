@@ -10,12 +10,13 @@
 | B | `B) Decide phase` | تحديد الوضع (auto/sync-only/build-only)، تجاهل SHA محجوب سابقًا | - |
 | C | `C) Attempt upstream merge` | الدمج على **فرع معزول**؛ حلّ التعارضات الموثّقة، وإلا **تقرير + توقف** | لا تفشل، لا تلمس master |
 | D | `D) Verify upstream contained` | التأكد أن الـcommit المبني يحتوي فعلاً على upstream | فشل واضح |
-| E | `E) Release version` | `<base>.<run_number>` | - |
+| E | `E) Release version` | `<base>.<versionCode>`؛ `versionCode` أكبر من رقم أحدث Release منشور | يفشل إذا تعذّر إثبات التزايد |
 | F | `F) Arabic resource completeness` | كل مفتاح في `values/` له ترجمة في `values-ar/` | فشل |
 | G | `G) Protected changes` | بقاء العربية/RTL/appId/DB/updater/conversation-scoped | فشل |
-| H–L | toolchains/tests/sign/build/verify APK | اختبارات ← توقيع ← بناء ← تحقّق من التوقيع وappId | فشل ⇒ لا نشر |
-| M | `M) Push validated merge` | دفع الدمج إلى master **بعد** نجاح الاختبارات والبناء والتحقق فقط | - |
-| N | `N) Publish GitHub Release` | نشر إصدار GitHub | - |
+| H–I3 | toolchains/tests/lint/Room instrumentation | JVM Release tests و`lintRelease` وRoom instrumentation على API 35 x86_64 مع KVM | فشل ⇒ لا نشر، وتُرفع تقارير test/lint دائمًا |
+| J–L | signing/build/verify APK | توقيع ← بناء ← تحقق `apksigner` من الشهادة و`aapt` من appId والإصدار | فشل ⇒ لا نشر |
+| M | `M) Push validated upstream merge` | دفع الدمج إلى master بعد الفحوص والبناء والتحقق، ومن تشغيل على master فقط | - |
+| N | `N) Publish GitHub Release` | نشر يدوي مصرح به فقط، دون clobber أو إعادة استخدام tag | افتراضيًا لا نشر |
 
 ## قواعد حلّ التعارض
 1. **قاعدة موثّقة واحدة فقط (تُطبَّق آليًا):**
@@ -41,28 +42,40 @@
 
 ## البناء اليدوي/النشر عند تعذّر المزامنة
 `workflow_dispatch` يدعم:
-- `mode=build-only` ⇒ بناء ونشر إصدار عربي من `master` الحالي بلا أي مزامنة.
-- `mode=sync-only` ⇒ **تجربة جافة (dry-run)**: يحاول الدمج ويُبلغ هل ينجح بلا تعارض،
-  ولا يدفع/يبني/ينشر إطلاقًا (لأنه لا تُشغَّل عليه الاختبارات).
+- `mode=build-only` ⇒ بناء APK من الفرع الذي بدأ منه dispatch (`github.ref_name`) بلا أي مزامنة؛ فرع المراجعة لا يُدفع إلى master.
+- `mode=sync-only` ⇒ يحاول الدمج ويُبلغ هل ينجح بلا تعارض؛ لا يدفع الدمج ولا يبني أو ينشر.
+  عند التعارض قد يسجل SHA المحجوب على master كما هو موثق أعلاه.
 - `mode=auto` (افتراضي) ⇒ مزامنة ثم بناء عند وجود جديد.
+- `publish_release` ⇒ Boolean افتراضيه `false`. لا يسمح النشر إلا إذا كان التشغيل `workflow_dispatch`
+  من `refs/heads/master` وكانت القيمة `true`، وبعد اكتمال الفحوص والتحقق ورفع APK كـartifact.
+  يظل الخيار **غير مفعّل** إلى أن يوافق كِنان صراحةً لاحقًا؛ لا يوجد نشر علني تلقائي.
 
 ## بوابة البناء (C2) — لماذا وُجدت
 `do_build` تُحسب بعد مرحلة الدمج وتمنع حالتين خطيرتين:
-- دمج نظيف في تشغيل مجدول ⇒ **يجب** أن يُبنى ويُنشر (وإلا يضيع الدمج لأنه لا يُدفع).
-- دمج محجوب بلا طلب بناء صريح ⇒ **يُمنع** البناء/النشر (وإلا نُشر كود بلا المزامنة المطلوبة).
-- push/force/build-only ⇒ يبني `master` الحالي حتى لو كانت المزامنة محجوبة.
+- دمج نظيف في تشغيل مجدول ⇒ يُبنى ويُتحقق منه ثم يُدفع إلى master ويُرفع APK كـartifact؛ **لا ينشر علنيًا تلقائيًا**.
+- دمج محجوب بلا طلب بناء صريح ⇒ **يُمنع** البناء (ولا يحدث نشر علني تلقائيًا).
+- push/force ⇒ يبني `master` الحالي؛ `build-only` يبني الفرع المحدد في dispatch حتى لو كانت المزامنة محجوبة.
 - `sync-only` ⇒ لا يبني أبدًا.
 
-## متى يُنشر إصدار التطبيق؟
-- **فقط** عندما: تنجح مزامنة upstream (دمج نظيف يُبنى ويُنشر)، **أو** يوجد طلب صريح
-  (`mode=build-only` أو `force_build=true`).
-- **push على `master` لا يكفي بحد ذاته:** يُبنى فقط إذا غيّر ملفات **خارج** `.github/`
-  و`docs/` و`*.md`. لذلك دفع إصلاحات CI (مثل تعديلات هذا الـworkflow) **لن ينشر إصدارًا**.
-- `mode=sync-only` لا ينشر أبدًا.
+## البناء مقابل النشر العلني
+- البناء لا يعني النشر: بعد نجاح التحقق يُرفع APK كـworkflow artifact ويُذكر outcome بدقة: **built and staged, not released** إذا كانت بوابة النشر مغلقة.
+- لا ينشر push أو schedule أو دمج upstream تلقائيًا. لا ينشر GitHub Release إلا عند `workflow_dispatch` صريح من `master` مع `publish_release=true` وبعد موافقة كِنان المحددة لاحقًا.
+- لا يُعاد استخدام tag موجود ولا يوجد fallback إلى `gh release upload --clobber`؛ وجود tag مكرر يوقف خطوة النشر.
+- `versionCode` أكبر من `versionCode` المستنتج من tag أحدث Release منشور، ولا يُنشأ tag إصدار مكرر.
+- `mode=sync-only` لا يبني ولا ينشر أبدًا.
 
 ## ضمانات غير قابلة للتفاوض
 - لا `reset --hard`، ولا `push --force`، ولا إعادة كتابة التاريخ.
 - لا يُستبدل أي ملف عربي بنسخة upstream دون مراجعة.
 - لا حذف لإصلاحات قاعدة البيانات/Room ولا لملفات التوقيع.
-- لا نشر إذا لم توجد تغييرات فعلية (push/force/merge).
-- لا نشر إذا فشلت الاختبارات أو التوقيع أو التحقق من APK.
+- لا نشر علني تلقائي؛ `publish_release` افتراضيًا `false`.
+- لا نشر إذا لم تكن الدعوة manual من `master` مع بوابة صريحة، أو فشلت الاختبارات أو `lintRelease` أو Room instrumentation أو التوقيع أو التحقق من APK.
+- التحقق يستخدم `apksigner verify --print-certs` وبصمة الشهادة المرجعية، و`aapt dump badging` لمطابقة `applicationId` و`versionName` و`versionCode` المتوقع.
+- فشل بعد خطوة البناء لا يُوصف بأنه «لم يُبنَ APK»؛ يذكر outcome حالة خطوة البناء ووجود الملف ورفع artifact والنشر كلٌّ على حدة.
+
+## إثبات الترقية قبل النشر
+يشمل التحقق اختبارات JVM للتطبيق واختبارات الوحدات للمكتبات التابعة، و`lintRelease`،
+واختبارات Room الفعلية على محاكي API 35. وبعد بناء APK بالمفتاح الدائم والتحقق من الشهادة،
+يُثبّت المحاكي الإصدار العربي المرجعي `v2.5.6.124` ثم يثبّت الجديد باستخدام `adb install -r`،
+ويتحقق من تشغيل التطبيق بعد الترقية. تُحفظ نتائج التثبيت وسجل التشغيل ضمن Artifact التقارير.
+هذا إثبات على المحاكي، وليس ادعاء باختبار هاتف المستخدم أو بياناته الشخصية.

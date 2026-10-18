@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.service
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
@@ -134,8 +136,14 @@ class UpdateDownloadService : Service() {
 
     private fun updateNotification(state: UpdateDownloadState) {
         if (!isForeground) return
-        runCatching {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) return
+        try {
             NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, buildNotification(state))
+        } catch (e: SecurityException) {
+            // The user can revoke notification access between the check and notify.
+            Log.w(TAG, "Update notification permission was revoked", e)
         }
     }
 

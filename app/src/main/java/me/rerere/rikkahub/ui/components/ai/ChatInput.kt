@@ -19,10 +19,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -36,6 +38,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
@@ -57,7 +60,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalFocusManager
@@ -71,17 +76,8 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
-import com.dokar.sonner.ToastType
-import dev.chrisbanes.haze.HazeInput
+import me.rerere.ui.toast.ToastType
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.blur.HazeBlurStyle
-import dev.chrisbanes.haze.blur.hazeBlur
-import dev.chrisbanes.haze.blur.material3.Material3
-import dev.chrisbanes.haze.glass.GlassDefaults
-import dev.chrisbanes.haze.glass.GlassStyle
-import dev.chrisbanes.haze.glass.OpticalSizeValue
-import dev.chrisbanes.haze.glass.hazeGlass
-import dev.chrisbanes.haze.glass.material3.Material3
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
 import me.rerere.ai.provider.Model
@@ -96,7 +92,6 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Fullscreen
 import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.datastore.BackgroundEffectType
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.getQuickMessagesOfAssistant
 import me.rerere.rikkahub.data.files.FilesManager
@@ -131,7 +126,6 @@ fun ChatInput(
     assistant: Assistant,
     chatModel: Model?,
     hazeState: HazeState,
-    enableSearch: Boolean,
     onUpdateSearchMode: (SearchMode) -> Unit,
     modifier: Modifier = Modifier,
     completionProviders: List<ChatCompletionProvider> = emptyList(),
@@ -152,10 +146,7 @@ fun ChatInput(
     onStopVoiceMode: () -> Unit = {},
 ) {
     val toaster = LocalToaster.current
-    val hazeTintColor = MaterialTheme.colorScheme.surfaceContainerLow
-    val inputHazeStyle = HazeBlurStyle.Material3 {
-        blurRadius(12.dp)
-    }
+    val containerColor = MaterialTheme.colorScheme.surfaceContainerLow
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
@@ -168,7 +159,7 @@ fun ChatInput(
         bottomStart = themeShape.bottomStart,
     )
     val modelListState = rememberModelListState(
-        modelId = chatModel?.id ?: assistant.chatModelId ?: settings.chatModelId,
+        modelId = chatModel?.id,
         providers = settings.providers,
         type = ModelType.CHAT,
     )
@@ -216,8 +207,19 @@ fun ChatInput(
         }
     }
 
+    // 底部渐变遮罩：从输入区顶部一直过渡到屏幕底部（键盘弹出时到键盘上沿），避免消息透到系统导航栏
+    val scrimColor = MaterialTheme.colorScheme.background
+    val imeInsets = WindowInsets.ime
     Surface(
         color = Color.Transparent,
+        modifier = Modifier.drawWithCache {
+            val brush = Brush.verticalGradient(
+                colors = listOf(scrimColor.copy(alpha = 0f), scrimColor),
+                startY = 0f,
+                endY = (size.height - imeInsets.getBottom(this)).coerceAtLeast(1f),
+            )
+            onDrawBehind { drawRect(brush) }
+        },
     ) {
         Column(
             modifier = modifier
@@ -238,34 +240,16 @@ fun ChatInput(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(containerShape)
-                    .then(
-                        if (settings.displaySetting.enableBlurEffect) {
-                            when (settings.displaySetting.backgroundEffectType) {
-                                BackgroundEffectType.BLUR -> Modifier.hazeBlur(
-                                    input = HazeInput.Sources(hazeState),
-                                    style = inputHazeStyle,
-                                )
-                                BackgroundEffectType.GLASS -> Modifier.hazeGlass(
-                                    input = HazeInput.Sources(hazeState),
-                                    style = GlassStyle.Material3(
-                                        containerColor = hazeTintColor,
-                                        tint = hazeTintColor.copy(alpha = 0.3f),
-                                    ) {
-                                        // Keep background text from competing with the input text.
-                                        optics(GlassDefaults.optics.copy(
-                                            blurRadius = OpticalSizeValue.Fixed(16.dp),
-                                            depth = OpticalSizeValue.Fixed(0.5f),
-                                        ))
-                                        shape(containerShape)
-                                    },
-                                )
-                            }
-                        } else Modifier
+                    .chatInputHaze(
+                        hazeState = hazeState,
+                        displaySetting = settings.displaySetting,
+                        containerColor = containerColor,
+                        shape = containerShape,
                     ),
                 shape = containerShape,
                 tonalElevation = 0.dp,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                color = if (settings.displaySetting.enableBlurEffect) Color.Transparent else hazeTintColor,
+                color = if (settings.displaySetting.enableBlurEffect) Color.Transparent else containerColor,
             ) {
                 Column(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -316,7 +300,7 @@ fun ChatInput(
                             val enableSearchMsg = stringResource(R.string.web_search_enabled)
                             val disableSearchMsg = stringResource(R.string.web_search_disabled)
                             SearchPickerButton(
-                                enableSearch = enableSearch,
+                                enableSearch = assistant.enableWebSearch,
                                 settings = settings,
                                 onUpdateSearchMode = { mode ->
                                     onUpdateSearchMode(mode)
@@ -490,6 +474,8 @@ private fun TextInputRow(
         settings.getQuickMessagesOfAssistant(assistant)
     }
 
+    var isEditingReasoning by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -507,6 +493,11 @@ private fun TextInputRow(
                 ) {
                     Text(text = stringResource(R.string.editing))
                     Spacer(Modifier.weight(1f))
+                    if (state.editingReasoning != null) {
+                        TextButton(onClick = { isEditingReasoning = true }) {
+                            Text(stringResource(R.string.chat_input_edit_reasoning))
+                        }
+                    }
                     Icon(
                         imageVector = HugeIcons.Cancel01,
                         contentDescription = stringResource(R.string.cancel_edit),
@@ -656,8 +647,17 @@ private fun TextInputRow(
             } else null,
         )
         if (isFullScreen) {
-            FullScreenEditor(state = state) {
+            FullScreenEditor(
+                textState = state.textContent,
+                placeholder = stringResource(R.string.chat_input_placeholder),
+            ) {
                 isFullScreen = false
+            }
+        }
+        val reasoningState = state.editingReasoning
+        if (isEditingReasoning && reasoningState != null) {
+            FullScreenEditor(textState = reasoningState, placeholder = stringResource(R.string.chat_input_reasoning_placeholder)) {
+                isEditingReasoning = false
             }
         }
     }
@@ -794,7 +794,9 @@ private fun QuickMessageButton(
 
 @Composable
 private fun FullScreenEditor(
-    state: ChatInputState, onDone: () -> Unit
+    textState: TextFieldState,
+    placeholder: String,
+    onDone: () -> Unit
 ) {
     BasicAlertDialog(
         onDismissRequest = {
@@ -833,13 +835,13 @@ private fun FullScreenEditor(
                         }
                     }
                     TextField(
-                        state = state.textContent,
+                        state = textState,
                         modifier = Modifier
                             .padding(bottom = 2.dp)
                             .fillMaxSize(),
                         shape = RoundedCornerShape(32.dp),
                         placeholder = {
-                            Text(stringResource(R.string.chat_input_placeholder))
+                            Text(placeholder)
                         },
                         keyboardOptions = KeyboardOptions(
                             capitalization = KeyboardCapitalization.Sentences,

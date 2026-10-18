@@ -25,9 +25,9 @@ android {
         minSdk = 26
         targetSdk = 37
         // CI injects the real values (-PreleaseVersion/-PreleaseCode); the literals below keep a
-        // sane version for local builds and follow the official upstream release (2.5.6).
-        versionCode = (project.findProperty("releaseCode") as String?)?.toIntOrNull() ?: 191
-        versionName = (project.findProperty("releaseVersion") as String?) ?: "2.5.6"
+        // sane version for local builds and follow the official upstream release (3.0.0).
+        versionCode = (project.findProperty("releaseCode") as String?)?.toIntOrNull() ?: 192
+        versionName = (project.findProperty("releaseVersion") as String?) ?: "3.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -129,6 +129,10 @@ android {
 // One APK per variant is built (no per-ABI split APKs). Keep the historical
 // "app-universal-<variant>.apk" artifact name that the release workflow publishes.
 androidComponents {
+    // Keep upstream baseline profile generator unoptimized.
+    finalizeDsl { extension ->
+        extension.buildTypes.findByName("nonMinifiedRelease")?.optimization?.enable = false
+    }
     onVariants { variant ->
         variant.outputs.forEach { output ->
             output.outputFileName.set("app-universal-${variant.name}.apk")
@@ -212,9 +216,6 @@ dependencies {
     implementation(libs.koin.compose)
     implementation(libs.koin.androidx.workmanager)
 
-    // jetbrains markdown parser
-    implementation(libs.jetbrains.markdown)
-
     // okhttp
     implementation(libs.okhttp)
     implementation(libs.okhttp.sse)
@@ -268,17 +269,17 @@ dependencies {
     implementation(libs.androidx.paging.runtime)
     implementation(libs.androidx.paging.compose)
 
+    // media3 (video playback)
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.ui)
+
     // Apache Commons Text
     implementation(libs.commons.text)
-
-    // Toast (Sonner)
-    implementation(libs.sonner)
 
     // Reorderable (https://github.com/Calvin-LL/Reorderable/)
     implementation(libs.reorderable)
 
-    // lucide icons
-    implementation(libs.lucide.icons)
+    // icons
     implementation(libs.huge.icons)
 
     // image viewer
@@ -313,6 +314,7 @@ dependencies {
     implementation(project(":mediagen"))
     implementation(project(":common"))
     implementation(project(":material3"))
+    implementation(project(":ui"))
     implementation(project(":workspace"))
     implementation(project(":oauth"))
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))

@@ -71,6 +71,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -81,7 +82,7 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
 import coil3.compose.AsyncImage
-import com.dokar.sonner.ToastType
+import me.rerere.ui.toast.ToastType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -100,16 +101,18 @@ import me.rerere.hugeicons.stroke.FloppyDisk
 import me.rerere.hugeicons.stroke.Image03
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.files.FileUtils
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.nav.BackButton
-import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.ImagePreviewDialog
-import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
+import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.utils.ImageUtils
+import me.rerere.ui.components.FormItem
+import me.rerere.ui.components.OutlinedNumberInput
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import java.io.File
@@ -122,6 +125,7 @@ fun ImageGenPage(
 ) {
     val pagerState = rememberPagerState { 2 }
     val scope = rememberCoroutineScope()
+    val navController = LocalNavController.current
 
     val isGenerating by vm.isGenerating.collectAsStateWithLifecycle()
     var showCancelDialog by remember { mutableStateOf(false) }
@@ -161,15 +165,34 @@ fun ImageGenPage(
             BottomBar(pagerState, scope)
         },
     ) { innerPadding ->
-        HorizontalPager(
-            state = pagerState,
+        Column(
             modifier = modifier
                 .padding(innerPadding)
                 .consumeWindowInsets(innerPadding)
-        ) { page ->
-            when (page) {
-                0 -> ImageGenScreen(vm = vm)
-                1 -> ImageGalleryScreen(vm = vm, isActive = pagerState.currentPage == 1)
+        ) {
+            Text(
+                text = stringResource(
+                    R.string.imggen_page_deprecated_warning,
+                    stringResource(R.string.media_creation_title)
+                ),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.labelMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        navController.navigate(Screen.MediaCreationSessions) { launchSingleTop = true }
+                    }
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.weight(1f)
+            ) { page ->
+                when (page) {
+                    0 -> ImageGenScreen(vm = vm)
+                    1 -> ImageGalleryScreen(vm = vm, isActive = pagerState.currentPage == 1)
+                }
             }
         }
     }
@@ -522,6 +545,7 @@ private fun ImageGalleryScreen(
 ) {
     val generatedImages = vm.generatedImages.collectAsLazyPagingItems()
     val context = LocalContext.current
+    val resources = LocalResources.current
     val filesManager: FilesManager = koinInject()
     val clipboardManager = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
@@ -571,8 +595,8 @@ private fun ImageGalleryScreen(
                             selectedImages = failed.associateBy { it.id }
                             selectionMode = failed.isNotEmpty()
                             toaster.show(
-                                message = if (failed.isEmpty()) context.getString(R.string.imggen_page_delete_images_success, images.size)
-                                else context.getString(
+                                message = if (failed.isEmpty()) resources.getString(R.string.imggen_page_delete_images_success, images.size)
+                                else resources.getString(
                                     R.string.imggen_page_delete_images_failed,
                                     images.size - failed.size,
                                     failed.size
@@ -738,12 +762,12 @@ private fun ImageGalleryScreen(
                                                         try {
                                                             filesManager.saveMessageImage(context, "file://${it.filePath}")
                                                             toaster.show(
-                                                                message = context.getString(R.string.imggen_page_image_saved_success),
+                                                                message = resources.getString(R.string.imggen_page_image_saved_success),
                                                                 type = ToastType.Success
                                                             )
                                                         } catch (e: Exception) {
                                                             toaster.show(
-                                                                message = context.getString(
+                                                                message = resources.getString(
                                                                     R.string.imggen_page_save_failed,
                                                                     e.message
                                                                 ),

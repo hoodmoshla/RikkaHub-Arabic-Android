@@ -6,6 +6,7 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.CustomHeader
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.rikkahub.utils.SimpleCache
@@ -50,19 +51,12 @@ data class Assistant(
     val enableTimeReminder: Boolean = false,            // 时间间隔提醒注入
     val timeReminderIntervalMinutes: Int = 60,          // 时间提醒间隔（分钟，至少 1 分钟）
     val allowConversationSystemPrompt: Boolean = false, // 允许对话单独重写 system prompt
-    val allowConversationPromptInjection: Boolean = false, // 允许对话单独绑定提示词注入
 )
 
 @Serializable
 data class QuickMessage(
     val id: Uuid = Uuid.random(),
     val title: String = "",
-    val content: String = "",
-)
-
-@Serializable
-data class AssistantMemory(
-    val id: Int,
     val content: String = "",
 )
 
@@ -119,6 +113,15 @@ fun String.replaceRegexes(
         } else {
             acc
         }
+    }
+}
+
+/** 对用户输入的文本应用助手作用于用户消息的正则替换 */
+fun List<UIMessagePart>.replaceUserRegexes(assistant: Assistant): List<UIMessagePart> = map { part ->
+    if (part is UIMessagePart.Text) {
+        part.copy(text = part.text.replaceRegexes(assistant, AssistantAffectScope.USER, visual = false))
+    } else {
+        part
     }
 }
 

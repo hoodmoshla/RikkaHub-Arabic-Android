@@ -3,11 +3,13 @@ package me.rerere.rikkahub.di
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.AppScope
+import me.rerere.rikkahub.data.ai.ChatRequestFactory
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.service.ChatNotificationManager
 import me.rerere.rikkahub.service.ChatService
+import me.rerere.rikkahub.service.MediaCreationService
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceTerminalSessionManager
 import me.rerere.rikkahub.utils.EmojiData
 import me.rerere.rikkahub.utils.EmojiUtils
@@ -83,12 +85,23 @@ val appModule = module {
 
     single {
         ChatToolFactory(
-            json = get(),
+            context = get(),
             memoryRepository = get(),
             conversationRepository = get(),
             localTools = get(),
             mcpManager = get(),
             skillManager = get(),
+            workspaceRepository = get(),
+        )
+    }
+
+    single {
+        ChatRequestFactory(
+            context = get(),
+            providerManager = get(),
+            chatToolFactory = get(),
+            memoryRepository = get(),
+            templateTransformer = get(),
             workspaceRepository = get(),
         )
     }
@@ -100,16 +113,25 @@ val appModule = module {
             appEventBus = get(),
             settingsStore = get(),
             conversationRepo = get(),
-            memoryRepository = get(),
-            generationLoop = get(),
+            requestFactory = get(),
+            memoryConsolidationScheduler = get(),
             translationHandler = get(),
-            templateTransformer = get(),
-            providerManager = get(),
-            chatToolFactory = get(),
+            metaGenerator = get(),
             mcpManager = get(),
             filesManager = get(),
-            workspaceRepository = get(),
             folderRepository = get()
+        )
+    }
+
+    single {
+        MediaCreationService(
+            context = get(),
+            appScope = get(),
+            settingsStore = get(),
+            repository = get(),
+            manager = get(),
+            remoteFileStore = get(),
+            okHttpClient = get(),
         )
     }
 
