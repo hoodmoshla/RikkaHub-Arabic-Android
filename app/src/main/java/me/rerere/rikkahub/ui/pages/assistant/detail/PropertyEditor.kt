@@ -19,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.serialization.json.Json
@@ -142,6 +143,7 @@ fun CustomHeaders(headers: List<CustomHeader>, onUpdate: (List<CustomHeader>) ->
 @Composable
 fun CustomBodies(customBodies: List<CustomBody>, onUpdate: (List<CustomBody>) -> Unit) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -200,7 +202,7 @@ fun CustomBodies(customBodies: List<CustomBody>, onUpdate: (List<CustomBody>) ->
                                         jsonParseError = null
                                     } catch (e: Exception) {
                                         jsonParseError =
-                                            context.getString(
+                                            resources.getString(
                                                 R.string.assistant_page_invalid_json,
                                                 e.message?.take(100) ?: ""
                                             )

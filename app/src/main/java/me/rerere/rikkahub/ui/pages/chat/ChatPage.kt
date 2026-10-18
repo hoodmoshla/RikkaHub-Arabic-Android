@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.pages.chat
 import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -40,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
@@ -110,7 +112,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val errors by vm.errors.collectAsStateWithLifecycle()
 
     // 新会话发出第一条消息前，跟随抽屉当前选中的文件夹（#2133）
-    val drawerVm: ChatDrawerVM = koinViewModel(viewModelStoreOwner = LocalContext.current as ComponentActivity)
+    val drawerVm: ChatDrawerVM = koinViewModel(viewModelStoreOwner = LocalActivity.current as ComponentActivity)
     val selectedFolderId by drawerVm.selectedFolderId.collectAsStateWithLifecycle()
     LaunchedEffect(selectedFolderId) {
         vm.updateDraftFolder(selectedFolderId)
@@ -286,6 +288,7 @@ private fun ChatPageContent(
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val resources = LocalResources.current
     val toaster = LocalToaster.current
     val workspaceRepository: WorkspaceRepository = koinInject()
 
@@ -371,7 +374,7 @@ private fun ChatPageContent(
                     },
                     onSendClick = {
                         if (currentChatModel == null) {
-                            toaster.show(context.getString(R.string.chat_page_select_model_first), type = ToastType.Error)
+                            toaster.show(resources.getString(R.string.chat_page_select_model_first), type = ToastType.Error)
                             return@ChatInput
                         }
                         if (inputState.isEditing()) {

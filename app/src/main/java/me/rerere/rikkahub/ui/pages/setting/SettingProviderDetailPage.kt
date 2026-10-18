@@ -71,6 +71,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -180,6 +181,7 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
     val toaster = LocalToaster.current
     val context = LocalContext.current
 
+    val resources = LocalResources.current
     val onEdit = { newProvider: ProviderSetting ->
         vm.updateSettings { latest ->
             latest.copy(
@@ -257,7 +259,7 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                             onEdit = {
                                 onEdit(it)
                                 toaster.show(
-                                    context.getString(R.string.setting_provider_page_save_success),
+                                    resources.getString(R.string.setting_provider_page_save_success),
                                     type = ToastType.Success
                                 )
                             },

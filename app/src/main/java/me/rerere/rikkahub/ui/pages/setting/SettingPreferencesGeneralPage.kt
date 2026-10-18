@@ -23,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.width
@@ -48,17 +49,18 @@ import org.koin.androidx.compose.koinViewModel
 @Composable
 fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     var appLanguage by remember { mutableStateOf(AppLocale.current(context)) }
     var showLanguageMenu by remember { mutableStateOf(false) }
     fun languageLabel(language: AppLanguage): String = when (language) {
-        AppLanguage.SYSTEM -> context.getString(R.string.setting_language_system)
-        AppLanguage.ENGLISH -> context.getString(R.string.language_english)
-        AppLanguage.SIMPLIFIED_CHINESE -> context.getString(R.string.language_simplified_chinese)
-        AppLanguage.TRADITIONAL_CHINESE -> context.getString(R.string.language_traditional_chinese)
-        AppLanguage.JAPANESE -> context.getString(R.string.language_japanese)
-        AppLanguage.KOREAN -> context.getString(R.string.language_korean)
-        AppLanguage.RUSSIAN -> context.getString(R.string.language_russian)
-        AppLanguage.ARABIC -> context.getString(R.string.language_arabic)
+        AppLanguage.SYSTEM -> resources.getString(R.string.setting_language_system)
+        AppLanguage.ENGLISH -> resources.getString(R.string.language_english)
+        AppLanguage.SIMPLIFIED_CHINESE -> resources.getString(R.string.language_simplified_chinese)
+        AppLanguage.TRADITIONAL_CHINESE -> resources.getString(R.string.language_traditional_chinese)
+        AppLanguage.JAPANESE -> resources.getString(R.string.language_japanese)
+        AppLanguage.KOREAN -> resources.getString(R.string.language_korean)
+        AppLanguage.RUSSIAN -> resources.getString(R.string.language_russian)
+        AppLanguage.ARABIC -> resources.getString(R.string.language_arabic)
     }
     val settings by vm.settings.collectAsStateWithLifecycle()
     var displaySetting by remember(settings) { mutableStateOf(settings.displaySetting) }

@@ -43,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -404,6 +405,7 @@ private fun MediaUploadS3Tab(
 ) {
     val toaster = LocalToaster.current
     val context = LocalContext.current
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     var testing by remember { mutableStateOf(false) }
 
@@ -444,13 +446,13 @@ private fun MediaUploadS3Tab(
                             remoteFileStore.testConnection()
                                 .onSuccess {
                                     toaster.show(
-                                        context.getString(R.string.backup_page_connection_success),
+                                        resources.getString(R.string.backup_page_connection_success),
                                         type = ToastType.Success
                                     )
                                 }
                                 .onFailure {
                                     toaster.show(
-                                        context.getString(R.string.backup_page_connection_failed, it.message ?: ""),
+                                        resources.getString(R.string.backup_page_connection_failed, it.message ?: ""),
                                         type = ToastType.Error
                                     )
                                 }

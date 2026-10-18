@@ -58,6 +58,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -115,6 +116,7 @@ fun SettingMcpDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
     val pager = rememberPagerState { McpDetailTab.entries.size }
     val toaster = LocalToaster.current
     val context = LocalContext.current
+    val resources = LocalResources.current
     // 草稿放在页面这一层，切到工具页再切回来不会丢掉没保存的修改
     var draft by remember { mutableStateOf(config) }
 
@@ -138,7 +140,7 @@ fun SettingMcpDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
             )
         }
         toaster.show(
-            context.getString(R.string.setting_provider_page_save_success),
+            resources.getString(R.string.setting_provider_page_save_success),
             type = ToastType.Success
         )
     }
