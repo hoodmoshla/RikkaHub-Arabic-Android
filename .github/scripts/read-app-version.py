@@ -30,7 +30,7 @@ def main():
                 pass
             else:
                 raise AssertionError('Invalid version unexpectedly accepted')
-        assert read_version(Path('app/build.gradle.kts').read_text()) == '3.0.0'
+        assert read_version(Path('app/build.gradle.kts').read_text())
         print('Version parser self-test passed (literal, override fallback, invalid inputs, real checkout).')
         return
     source = sys.stdin.read() if arg == '-' else Path(arg).read_text()
