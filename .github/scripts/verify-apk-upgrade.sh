@@ -86,8 +86,14 @@ python3 "$HELPER" seed "$WORK/pristine/$DB_NAME" "$WORK/pristine/settings.prefer
 # On a brand-new package install the test database may have an existing WAL. Push an empty
 # WAL over it (rather than deleting app data) after the host checkpoint has merged transactions.
 : > "$WORK/pristine/$DB_NAME-wal"
-APP_UID="$(adb shell dumpsys package "$PACKAGE" | tr -d '\r' | sed -nE 's/.*userId=([0-9]+).*/\1/p' | head -n1)"
-[[ "$APP_UID" =~ ^[0-9]+$ ]] || { echo "Could not determine installed app UID" >&2; exit 1; }
+# PackageManager dumpsys labels vary by Android release (userId/appId).
+# The database and package directory were just created by this app: use their actual owner.
+APP_UID="$(adb shell stat -c %u "$DB" | tr -d '\r')"
+PACKAGE_UID="$(adb shell stat -c %u "$REMOTE" | tr -d '\r')"
+[[ "$APP_UID" =~ ^[0-9]+$ && "$APP_UID" == "$PACKAGE_UID" && "$APP_UID" -ge 10000 ]] || {
+  echo "Database owner does not match an installed application UID" >&2; exit 1;
+}
+printf 'app_uid=%s\n' "$APP_UID" > "$EVIDENCE/app-uid.txt"
 adb push "$WORK/pristine/$DB_NAME" "$DB" > "$EVIDENCE/push-seed-db.txt"
 adb push "$WORK/pristine/$DB_NAME-wal" "$DB-wal" > "$EVIDENCE/push-seed-wal.txt"
 adb push "$WORK/pristine/settings.preferences_pb" "$PREFS" > "$EVIDENCE/push-seed-settings.txt"
