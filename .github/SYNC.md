@@ -17,6 +17,7 @@
 | G | `G) Protected changes` | بقاء العربية/RTL/appId/DB/updater/conversation-scoped | فشل |
 | H–I3 | toolchains/tests/lint/Room instrumentation | JVM Release tests و`lintRelease` وRoom instrumentation على API 35 x86_64 مع KVM | فشل ⇒ لا نشر، وتُرفع تقارير test/lint دائمًا |
 | J–L | signing/build/verify APK | توقيع ← بناء ← تحقق `apksigner` من الشهادة و`aapt` من appId والإصدار | فشل ⇒ لا نشر |
+| P3 | `P3) Record validation failure (state only)` | عند فشل تحقق مرشح نظيف مطلوب بناؤه، يسجل SHA محظورًا في worktree منفصل من `origin/master` | دفع state فقط؛ لا يدفع مرشح الدمج |
 | M | `M) Push validated upstream merge` | دفع الدمج إلى master بعد الفحوص والبناء والتحقق، وبحراس صريحة `auto` و`master` ونجاح المهمة | - |
 | N | `N) Publish GitHub Release` | نشر يدوي مصرح به فقط، دون clobber أو إعادة استخدام tag | افتراضيًا لا نشر |
 
@@ -37,10 +38,15 @@
 
 ## منع تكرار المحاولات الفاشلة
 عند تعارض في تشغيل إنتاجي `auto` على `master`، تكتب خطوة C1 المستقلة `blockedUpstream` في
-`.github/upstream-sync.json` (commit واحد فقط عندما تتغيّر الحالة، مع `[skip ci]`). لا تكتب خطوة
-الدمج نفسها الحالة، ولا يسجل `sync-only` أي شيء. وبالتالي:
+`.github/upstream-sync.json` (commit واحد فقط عندما تتغيّر الحالة، مع `[skip ci]`). وإذا كان الدمج
+نظيفًا لكن فشل التحقق/الاختبار/التوقيع/البناء/الترقية مع `do_build=true`، تكتب P3 الحالة نفسها
+مع `blockedStage=validation` و`blockedFiles=[]` وسبب ثابت لا ينسخ سجلات أو أسرارًا. تبدأ P3
+worktree مؤقتًا من `origin/master` بعد fetch، وتدفع commit يحتوي ملف الحالة فقط؛ لا تدفع مطلقًا
+مرشح الدمج الذي فشل. إذا أصبح upstream ancestor لـ`origin/master` قبل تسجيل الحالة، تتخطى P3
+الكتابة كي لا تحظر SHA قديمًا. لا تسجل `sync-only` أو `build-only` أو فروع المراجعة أو التشغيل
+الناجح أي حالة failure. وبالتالي:
 - التشغيل المجدول كل 6 ساعات **لا يعيد** محاولة نفس الـSHA.
-- عندما يتقدّم upstream إلى SHA جديد ⇒ محاولة جديدة تلقائيًا.
+- عندما يتقدّم upstream إلى SHA جديد ⇒ محاولة جديدة تلقائيًا، سواء كان الحظر بسبب تعارض أو تحقق.
 - لإجبار إعادة محاولة نفس الـSHA بعد إصلاح القواعد/الحل اليدوي: شغّل الـworkflow مع
   `force_sync=true` أو أفرغ `blockedUpstream` في ملف الحالة.
 
@@ -67,6 +73,8 @@
 - لا يُعاد استخدام tag موجود ولا يوجد fallback إلى `gh release upload --clobber`؛ وجود tag مكرر يوقف خطوة النشر.
 - `versionCode` أكبر من `versionCode` المستنتج من tag أحدث Release منشور، ولا يُنشأ tag إصدار مكرر.
 - `mode=sync-only` لا ينشئ commit محليًا ولا يكتب الحالة ولا يدفع ولا يبني ولا ينشر أبدًا.
+- تسجيل فشل التحقق لا يحدث إلا بعد merge نظيف و`do_build=true` وفشل المهمة على `auto`/`master`؛
+  commitه مبني على `origin/master` ويحتوي ملف الحالة وحده، لا ملفات التطبيق ولا merge المرشح.
 
 ## ضمانات غير قابلة للتفاوض
 - لا `reset --hard`، ولا `push --force`، ولا إعادة كتابة التاريخ.

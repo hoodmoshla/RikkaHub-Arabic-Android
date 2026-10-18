@@ -65,7 +65,8 @@ def main():
         "F) Validate Arabic resource completeness", "G) Validate Arabic integration hooks",
         "I) Run app JVM unit tests", "I2) Run lintRelease", "I3) Run Room instrumentation tests",
         "J) Restore signing key", "K) Build signed universal APK", "L) Verify generated APK integrity",
-        "M) Push validated upstream merge", "N) Publish GitHub Release", "O) Outcome",
+        "P3) Record validation failure", "M) Push validated upstream merge",
+        "N) Publish GitHub Release", "O) Outcome",
     ):
         check(f"phase present: {phase}", any(name.startswith(phase) for name in names))
 
@@ -121,7 +122,7 @@ def main():
           'IS_PUSH" = true ] && [ "$APP_CHANGED" != true' in by_prefix("B) Decide phase")["run"] and
           'CI/docs-only push: skip sync, build, and release.' in by_prefix("B) Decide phase")["run"])
 
-    # Any push must be explicitly mode=auto, master-ref and success guarded.
+    # Normal state/merge pushes are success-only; the third push is intentionally failure-only.
     for prefix in ("C1) Record blocked upstream state", "M) Push validated upstream merge"):
         push_step = by_prefix(prefix)
         if push_step and "git push" in push_step["run"]:
@@ -133,6 +134,28 @@ def main():
     check("validated merge push is expression-guarded by success/auto/master",
           push is not None and "success()" in push["if"] and "steps.plan.outputs.mode == 'auto'" in push["if"] and
           "github.ref == 'refs/heads/master'" in push["if"])
+    failure_record = by_prefix("P3) Record validation failure")
+    check("P3 state-only push is intentionally failure-only and production guarded",
+          failure_record is not None and "failure()" in failure_record["if"] and
+          "steps.merge.outputs.merged_upstream == 'true'" in failure_record["if"] and
+          "steps.gate.outputs.do_build == 'true'" in failure_record["if"] and
+          "steps.plan.outputs.mode == 'auto'" in failure_record["if"] and
+          "github.ref == 'refs/heads/master'" in failure_record["if"] and
+          'test "$JOB_STATUS" = failure' in failure_record["run"] and
+          'test "$MERGED_UPSTREAM" = true' in failure_record["run"] and
+          'test "$DO_BUILD" = true' in failure_record["run"])
+    failure_run = failure_record["run"] if failure_record else ""
+    check("P3 fetches origin/master, skips already-contained upstream, and uses an isolated worktree",
+          "git fetch origin master:refs/remotes/origin/master" in failure_run and
+          'git merge-base --is-ancestor "$UPSTREAM_SHA" "$MASTER_SHA"' in failure_run and
+          'git worktree add --detach "$STATE_WT" "$MASTER_SHA"' in failure_run)
+    check("P3 state records validation stage without logs and stages only the state file",
+          'state["blockedStage"] = "validation"' in failure_run and
+          'state["blockedFiles"] = []' in failure_run and 'state["reason"]' in failure_run and
+          'git -C "$STATE_WT" add -- "$STATE_FILE"' in failure_run and
+          'test "$STAGED" = "$STATE_FILE"' in failure_run and
+          'git -C "$STATE_WT" push origin HEAD:master' in failure_run and
+          'git push origin HEAD:master' not in failure_run)
 
     # Every build/release action is gated; publication remains explicitly manual.
     build_steps = [s for s in steps if re.match(r"^([E-N])\)", s.get("name", ""))]
