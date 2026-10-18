@@ -5,7 +5,9 @@ import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.service.createForkConversation
+import me.rerere.rikkahub.data.model.fork
+import me.rerere.ai.ui.UIMessage
+import me.rerere.rikkahub.data.model.toMessageNode
 import me.rerere.rikkahub.utils.JsonInstant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -165,16 +167,17 @@ class ConversationScopedSettingsTest {
 
     @Test
     fun `fork inherits conversation scoped model and workspace`() {
+        val message = UIMessage.user("fork context")
         val source = Conversation(
             assistantId = assistantId,
             title = "Source",
-            messageNodes = emptyList(),
+            messageNodes = listOf(message.toMessageNode()),
             modelId = modelA.id,
             workspaceId = projectA,
             workspaceCwd = "/project/A",
         )
 
-        val fork = createForkConversation(source, emptyList())
+        val fork = source.fork(message.id, emptySet()) { it }!!
 
         assertNotEquals(source.id, fork.id)
         assertEquals(source.assistantId, fork.assistantId)
