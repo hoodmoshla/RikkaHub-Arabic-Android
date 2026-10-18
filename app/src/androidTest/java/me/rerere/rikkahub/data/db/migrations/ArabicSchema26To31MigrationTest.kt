@@ -40,7 +40,7 @@ class ArabicSchema26To31MigrationTest {
             )
             execSQL(
                 "INSERT INTO MemoryEntity (id, assistant_id, content) VALUES (?, ?, ?)",
-                arrayOf<Any?>("memory-1", "assistant-1", "keep this memory"),
+                arrayOf<Any?>(1L, "assistant-1", "keep this memory"),
             )
             execSQL(
                 """INSERT INTO message_node (id, conversation_id, node_index, messages, select_index)
