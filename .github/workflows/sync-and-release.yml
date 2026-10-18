@@ -166,7 +166,7 @@ jobs:
             elif [ -n "$AFTER" ] && git cat-file -e "$AFTER^{commit}" 2>/dev/null; then
               CHANGED=$(git diff-tree --no-commit-id --name-only -r "$AFTER" 2>/dev/null || true)
             fi
-            if printf '%s\n' "$CHANGED" | grep -vE '^(.github/|docs/)|\.md$' | grep -q .; then
+            if printf '%s\n' "$CHANGED" | grep -vE '^([.]github/|docs/)|\.md$' | grep -q .; then
               APP_CHANGED=true
             fi
             echo "Push non-CI app changes: $APP_CHANGED"
@@ -369,8 +369,8 @@ jobs:
           elif [ "$MODE" = build-only ]; then
             DO_BUILD=true
           elif [ "$BLOCKED" = true ]; then
-            # A blocked automatic sync may only proceed on an explicit force_build.
-            [ "$FORCE_BUILD" = true ] && DO_BUILD=true
+            # Never build or publish an unresolved automatic sync, even when forced.
+            DO_BUILD=false
           elif [ "$EVENT_NAME" = push ] && [ "$APP_CHANGED" != true ]; then
             DO_BUILD=false
           elif [ "$CURRENT" = true ] || [ "$MERGED" = true ]; then

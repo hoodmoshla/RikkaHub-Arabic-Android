@@ -155,7 +155,7 @@ def gate(work: Path, env: dict[str, str], merge_output: dict[str, str] | None = 
         "MODE": env["INPUT_MODE"],
         "FORCE_BUILD": env["INPUT_FORCE_BUILD"],
         "APP_CHANGED": env.get("PLAN_APP_CHANGED", "false"),
-        "INPUT_PUBLISH_RELEASE": "false",
+        "INPUT_PUBLISH_RELEASE": env.get("INPUT_PUBLISH_RELEASE", "false"),
     })
     _, output = run_step("C2) Gate build/release", work, env)
     return output
@@ -229,6 +229,11 @@ def test_auto_conflict_records_state_then_new_sha_retries(root: Path) -> None:
     m = merge(work, env)
     assert m["blocked"] == "true"
     before_head = git(work, "rev-parse", "HEAD")
+    env.update({"INPUT_FORCE_BUILD": "true", "INPUT_PUBLISH_RELEASE": "true"})
+    plan(work, env)
+    denied = gate(work, env, m)
+    assert denied["do_build"] == "false" and denied["publish_release"] == "false", "fresh conflict cannot be forced into a build/release"
+    env.update({"INPUT_FORCE_BUILD": "false", "INPUT_PUBLISH_RELEASE": "false"})
     # The merge itself aborts without committing. State recording is a distinct, guarded step.
     assert before_head == git(origin, "rev-parse", "refs/heads/master")
     (work / ".github").mkdir(exist_ok=True)
@@ -259,7 +264,7 @@ def test_auto_conflict_records_state_then_new_sha_retries(root: Path) -> None:
     forced_plan = plan(work, env)
     assert forced_plan["should_build"] == "true"
     forced_gate = gate(work, env)
-    assert forced_gate["do_build"] == "true", "force_build must be the explicit override"
+    assert forced_gate["do_build"] == "false", "force_build cannot bypass a recorded conflict"
     env["INPUT_FORCE_BUILD"] = "false"
     env["EVENT_NAME"] = "workflow_dispatch"
     upstream_work = root / "upstream-work"

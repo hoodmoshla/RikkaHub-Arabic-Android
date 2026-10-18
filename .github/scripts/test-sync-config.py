@@ -112,9 +112,9 @@ def main():
 
     gate = by_prefix("C2) Gate build/release")
     check("build gate is fail closed after prior failures", gate is not None and gate.get("if") == "success()")
-    check("gate blocks sync-only and only force_build bypasses blocked auto",
+    check("gate blocks sync-only and unresolved auto even when forced",
           'MODE" = sync-only' in gate["run"] and 'BLOCKED" = true' in gate["run"] and
-          'FORCE_BUILD" = true' in gate["run"] and
+          'elif [ "$BLOCKED" = true ]; then\n  # Never build or publish an unresolved automatic sync, even when forced.\n  DO_BUILD=false' in gate["run"] and
           "steps.plan.outputs.upstream_blocked == 'true'" in gate.get("env", {}).get("BLOCKED", "") and
           "upstream_blocked=$BLOCKED_CURRENT" in by_prefix("B) Decide phase")["run"])
     check("CI-only push is excluded from sync and build planning",
