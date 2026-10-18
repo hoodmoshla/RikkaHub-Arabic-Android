@@ -26,6 +26,7 @@ ABI="$(adb shell getprop ro.product.cpu.abi | tr -d '\r')"
 [[ "$SDK" == 35 ]] || { echo "Expected API 35 emulator; found SDK=$SDK" >&2; exit 1; }
 [[ "$ABI" == x86_64 ]] || { echo "Expected x86_64 emulator; found ABI=$ABI" >&2; exit 1; }
 adb root > "$EVIDENCE/adb-root.txt" 2>&1 || { cat "$EVIDENCE/adb-root.txt" >&2; echo 'adb root is required; refusing to run without root.' >&2; exit 1; }
+adb wait-for-device
 ROOT_UID="$(adb shell id -u | tr -d '\r')"
 [[ "$ROOT_UID" == 0 ]] || { echo "adb root failed closed (uid=$ROOT_UID)" >&2; exit 1; }
 printf 'sdk=%s\nabi=%s\nroot_uid=%s\n' "$SDK" "$ABI" "$ROOT_UID" > "$EVIDENCE/emulator.txt"
@@ -70,7 +71,8 @@ adb shell test -f "$DB" || { echo "Room database not initialized at $DB" >&2; ex
 adb shell test -f "$PREFS" || { echo "Preferences DataStore not initialized at $PREFS" >&2; exit 1; }
 
 pull_state() {
-  local label="$1" dest="$WORK/$label"
+  local label="$1"
+  local dest="$WORK/$label"
   mkdir -p "$dest"
   adb pull "$DB" "$dest/$DB_NAME" > "$EVIDENCE/pull-${label}-db.txt"
   adb pull "$PREFS" "$dest/settings.preferences_pb" > "$EVIDENCE/pull-${label}-settings.txt"
@@ -84,12 +86,12 @@ python3 "$HELPER" seed "$WORK/pristine/$DB_NAME" "$WORK/pristine/settings.prefer
 # On a brand-new package install the test database may have an existing WAL. Push an empty
 # WAL over it (rather than deleting app data) after the host checkpoint has merged transactions.
 : > "$WORK/pristine/$DB_NAME-wal"
-UID="$(adb shell dumpsys package "$PACKAGE" | tr -d '\r' | sed -nE 's/.*userId=([0-9]+).*/\1/p' | head -n1)"
-[[ "$UID" =~ ^[0-9]+$ ]] || { echo "Could not determine installed app UID" >&2; exit 1; }
+APP_UID="$(adb shell dumpsys package "$PACKAGE" | tr -d '\r' | sed -nE 's/.*userId=([0-9]+).*/\1/p' | head -n1)"
+[[ "$APP_UID" =~ ^[0-9]+$ ]] || { echo "Could not determine installed app UID" >&2; exit 1; }
 adb push "$WORK/pristine/$DB_NAME" "$DB" > "$EVIDENCE/push-seed-db.txt"
 adb push "$WORK/pristine/$DB_NAME-wal" "$DB-wal" > "$EVIDENCE/push-seed-wal.txt"
 adb push "$WORK/pristine/settings.preferences_pb" "$PREFS" > "$EVIDENCE/push-seed-settings.txt"
-adb shell "chown $UID:$UID '$DB' '$DB-wal' '$PREFS' && chmod 660 '$DB' '$DB-wal' '$PREFS'"
+adb shell "chown $APP_UID:$APP_UID '$DB' '$DB-wal' '$PREFS' && chmod 660 '$DB' '$DB-wal' '$PREFS'"
 
 # Old release must successfully consume the seeded model and leave its records intact.
 launch_and_check previous-seeded
