@@ -29,9 +29,9 @@ def main():
     db.execute("INSERT INTO message_node (id,conversation_id,node_index,messages,select_index) VALUES ('invalid','conv',1,'not json',0)")
     before = db.execute('SELECT * FROM message_node ORDER BY id').fetchall()
     source = (MIGRATIONS / 'Migration_31_32.kt').read_text()
-    statements = re.findall(r'db\.execSQL\((.*?)\n\s*\)|db\.execSQL\(("CREATE INDEX[^\n]+")\)', source, re.S)
+    statements = re.findall(r'db\.execSQL\(("[^\n]*")\)|db\.execSQL\(\n(.*?)\n {12}\)', source, re.S)
     count = 0
-    for multiline, single in statements:
+    for single, multiline in statements:
         body = multiline or single
         if '"""' in body:
             sql = body.split('"""')[1].strip()
