@@ -32,3 +32,4 @@ jobs:
           python3 .github/scripts/test-sync-behavior.py
           python3 .github/scripts/read-app-version.py --self-test
           python3 .github/scripts/verify-apk-upgrade_data.py self-test
+          if [ -f .github/scripts/test-candidate-migration.py ]; then python3 .github/scripts/test-candidate-migration.py; fi
