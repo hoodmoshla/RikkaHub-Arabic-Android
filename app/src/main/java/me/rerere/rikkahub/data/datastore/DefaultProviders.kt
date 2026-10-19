@@ -8,11 +8,11 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
-import me.rerere.ai.provider.BalanceOption
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.QuotaQuery
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import kotlin.uuid.Uuid
@@ -135,9 +135,9 @@ val DEFAULT_PROVIDERS = listOf(
         baseUrl = "https://api.deepseek.com/v1",
         apiKey = "",
         builtIn = true,
-        balanceOption = BalanceOption(
+        quotaQuery = QuotaQuery(
             enabled = true,
-            apiPath = "/user/balance",
+            url = "{{baseUrl}}/user/balance",
             resultPath = "balance_infos[0].total_balance"
         )
     ),
@@ -148,9 +148,9 @@ val DEFAULT_PROVIDERS = listOf(
         apiKey = "",
         enabled = true,
         builtIn = true,
-        balanceOption = BalanceOption(
+        quotaQuery = QuotaQuery(
             enabled = true,
-            apiPath = "/users/me/balance",
+            url = "{{baseUrl}}/users/me/balance",
             resultPath = "data.available_balance"
         )
     ),
@@ -160,9 +160,9 @@ val DEFAULT_PROVIDERS = listOf(
         baseUrl = "https://openrouter.ai/api/v1",
         apiKey = "",
         builtIn = true,
-        balanceOption = BalanceOption(
+        quotaQuery = QuotaQuery(
             enabled = true,
-            apiPath = "/credits",
+            url = "{{baseUrl}}/credits",
             resultPath = "data.total_credits - data.total_usage",
         )
     ),
@@ -173,9 +173,9 @@ val DEFAULT_PROVIDERS = listOf(
         apiKey = "",
         enabled = false,
         builtIn = true,
-        balanceOption = BalanceOption(
+        quotaQuery = QuotaQuery(
             enabled = true,
-            apiPath = "/credits",
+            url = "{{baseUrl}}/credits",
             resultPath = "balance",
         )
     ),
