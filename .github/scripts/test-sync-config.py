@@ -39,6 +39,11 @@ def main():
     check("workflow parses", isinstance(wf, dict))
     check("push/schedule/workflow_dispatch triggers exist",
           all(k in triggers for k in ("push", "schedule", "workflow_dispatch")))
+    push_trigger = triggers.get("push", {})
+    check("push path filter stays on master and re-includes runtime paths after Markdown/docs exclusions",
+          push_trigger.get("branches") == ["master"] and push_trigger.get("paths") == [
+              "**", "!**.md", "!docs/**", "**/src/main/**", "web-ui/public/**"
+          ] and "paths-ignore:" not in text)
 
     # Preserve actual APK certificate parser behavior, not just its spelling.
     integrity = by_prefix("L) Verify generated APK integrity")
@@ -128,8 +133,10 @@ def main():
           'git merge-base upstream/master HEAD' in fetch_run and
           'classify-app-changes.py "$MERGE_BASE" "$UPSTREAM_SHA"' in fetch_run and
           'has_upstream_app_changes=$UPSTREAM_APP_CHANGED' in fetch_run and
-          'path.startswith(b".github/")' in classifier_text and
-          'path.startswith(b"docs/")' in classifier_text and 'path.endswith(b".md")' in classifier_text and
+          'path.startswith((b".github/", b"docs/"))' in classifier_text and
+          'runtime_asset = (' in classifier_text and 'b"/src/main/" in path' in classifier_text and
+          'path.startswith(b"web-ui/public/")' in classifier_text and
+          'return not path.endswith(b".md")' in classifier_text and
           by_prefix("B) Decide phase")["env"].get("FETCH_HAS_UPSTREAM_APP_CHANGES") ==
           "${{ steps.fetch_upstream.outputs.has_upstream_app_changes }}")
     check("auto sync skips upstream CI/docs-only unless force_sync is explicit",
@@ -248,6 +255,10 @@ def main():
           "لا يكتب ملف الحالة" in docs and "لا يدفع" in docs)
     check("docs describe selected dispatch ref and build-only independence",
           "كل وضع" in docs and "دون جلب upstream" in docs)
+    check("docs distinguish always-excluded CI/docs from runtime Markdown and trigger exceptions",
+          "`.github/**` و`docs/**` مستثناة دائمًا" in docs and
+          "`/src/main/`" in docs and "`web-ui/public/`" in docs and
+          "محصور بفرع `master`" in docs and "Markdown غير runtime" in docs)
 
     print()
     if failures:
