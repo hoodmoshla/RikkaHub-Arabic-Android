@@ -1,0 +1,34 @@
+name: PR Python safety tests
+
+on:
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test parser dependency
+        run: python -m pip install --disable-pip-version-check PyYAML
+
+      - name: Run current Python safety tests only
+        run: |
+          python3 .github/scripts/test-sync-config.py
+          python3 .github/scripts/test-sync-behavior.py
+          python3 .github/scripts/read-app-version.py --self-test
+          python3 .github/scripts/verify-apk-upgrade_data.py self-test
