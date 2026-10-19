@@ -1,0 +1,57 @@
+name: Upstream candidate validation (no publication)
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: candidate-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  android-validation:
+    if: startsWith(github.head_ref || github.ref_name, 'review/upstream-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Checkout reviewed candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web-ui/pnpm-lock.yaml
+      - name: Install web-ui dependencies
+        working-directory: web-ui
+        run: pnpm install --frozen-lockfile
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: JVM unit tests (no release assembly)
+        run: ./gradlew :app:testDebugUnitTest :ai:test :common:test :document:test :highlight:test :material3:test :mediagen:test :oauth:test :search:test :speech:test :ui:test :web:test :workspace:test --no-daemon
+      - name: Compile and lint release sources (no signing)
+        run: ./gradlew :app:lintRelease --no-daemon
+      - name: Upload test and lint reports only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-test-reports
+          path: |
+            **/build/reports/tests/**
+            **/build/test-results/**
+            app/build/reports/lint-results*
+          if-no-files-found: warn
