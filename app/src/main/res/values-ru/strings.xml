@@ -1741,4 +1741,5 @@
   <string name="setting_provider_page_grok_disclaimer">Использует вашу подписку SuperGrok, выполняя вход так же, как в Grok CLI. Экспериментально: xAI может в любое время изменить или ограничить эту функцию.</string>
   <string name="setting_provider_page_device_code_hint">Подтвердите этот код в браузере</string>
   <string name="setting_provider_page_device_code_reopen">Нажмите, чтобы снова открыть страницу</string>
+    <string name="chat_page_compress_keep_recent_desc">Эти сообщения не сжимаются и остаются после сводки. Значение 0 сжимает всё и лучше всего использует кэш промпта; если диалог слишком длинный для сжатия, сохраните больше сообщений.</string>
 </resources>
