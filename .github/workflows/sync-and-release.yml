@@ -23,9 +23,12 @@ on:
   push:
     branches:
       - master
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
+    paths:
+      - '**'
+      - '!**.md'
+      - '!docs/**'
+      - '**/src/main/**'
+      - 'web-ui/public/**'
   schedule:
     - cron: '0 */6 * * *'
   workflow_dispatch:

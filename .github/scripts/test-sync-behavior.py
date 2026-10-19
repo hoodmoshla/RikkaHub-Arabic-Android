@@ -328,6 +328,27 @@ def test_schedule_upstream_docs_only_does_not_sync_or_build(root: Path) -> None:
     assert git(origin, "rev-parse", "refs/heads/master") == before_remote
 
 
+def test_schedule_upstream_runtime_markdown_asset_is_merged_and_built(root: Path) -> None:
+    work, origin, _upstream, base_sha = fixture(root)
+    asset_path = "app/src/main/assets/builtin_skills/skill-creator/SKILL.md"
+    asset_upstream = make_upstream_variant(
+        root, work, base_sha, "runtime-markdown-asset",
+        {asset_path: "# Updated built-in skill\n"},
+    )
+    env = base_env(work, asset_upstream, event="schedule")
+    fetched = fetch(work, env)
+    assert fetched["has_new_upstream"] == "true"
+    assert fetched["has_upstream_app_changes"] == "true"
+    p = plan(work, env)
+    assert p["should_sync"] == "true" and p["should_build"] == "false"
+    m = merge(work, env)
+    assert m["merged_upstream"] == "true" and m["blocked"] == "false"
+    g = gate(work, env, m)
+    assert g["do_build"] == "true" and g["publish_release"] == "false"
+    assert (work / asset_path).read_text() == "# Updated built-in skill\n"
+    assert git(work, "rev-parse", "HEAD") != git(origin, "rev-parse", "refs/heads/master")
+
+
 def test_schedule_upstream_mixed_ci_docs_and_app_is_merged_and_built(root: Path) -> None:
     work, origin, _upstream, base_sha = fixture(root)
     mixed_upstream = make_upstream_variant(
@@ -613,6 +634,29 @@ def test_ci_only_push_ignores_available_upstream(root: Path) -> None:
     assert git(work, "rev-parse", "HEAD") == git(origin, "rev-parse", "refs/heads/master")
 
 
+def test_runtime_markdown_asset_only_push_opens_build_gate(root: Path) -> None:
+    work, origin, upstream, base_sha = fixture(root)
+    subprocess.run(["git", "--git-dir", str(upstream), "update-ref", "refs/heads/master", base_sha], check=True)
+    before = git(work, "rev-parse", "HEAD")
+    asset_path = "app/src/main/assets/builtin_skills/skill-creator/SKILL.md"
+    asset = work / asset_path
+    asset.parent.mkdir(parents=True, exist_ok=True)
+    asset.write_text("# Runtime skill update\n")
+    git(work, "add", asset_path)
+    git(work, "commit", "-m", "Update built-in skill asset")
+    after = git(work, "rev-parse", "HEAD")
+    git(work, "push", "origin", "master")
+
+    env = base_env(work, upstream, event="push")
+    env.update({"PUSH_BEFORE": before, "PUSH_AFTER": after})
+    fetch(work, env)
+    p = plan(work, env)
+    assert p["app_changed"] == "true" and p["should_build"] == "true"
+    g = gate(work, env)
+    assert g["do_build"] == "true" and g["publish_release"] == "false"
+    assert git(origin, "rev-parse", "refs/heads/master") == after
+
+
 def main() -> None:
     tests = [
         ("clean auto merge is built and pushed only after success", test_clean_auto_and_push),
@@ -620,6 +664,7 @@ def main() -> None:
         ("schedule upstream app update is merged and built", test_schedule_upstream_app_update_is_merged_and_built),
         ("schedule upstream CI-only update does not sync/build absent explicit force", test_schedule_upstream_ci_only_does_not_sync_or_build),
         ("schedule upstream docs-only update does not sync/build", test_schedule_upstream_docs_only_does_not_sync_or_build),
+        ("schedule upstream runtime Markdown asset is merged and built", test_schedule_upstream_runtime_markdown_asset_is_merged_and_built),
         ("schedule mixed CI/docs/app upstream update is merged and built", test_schedule_upstream_mixed_ci_docs_and_app_is_merged_and_built),
         ("real Git classifier handles rename/delete and fails closed", test_git_classifier_handles_renames_deletes_and_fail_closed),
         ("upstream fetch/classification failure does not degrade into no-update", test_upstream_classifier_fails_closed_when_merge_base_or_diff_is_invalid),
@@ -630,6 +675,7 @@ def main() -> None:
         ("validation failure recorder refuses dry-run/build-only/review/success before writes", test_validation_failure_recorder_refuses_out_of_scope_before_writes),
         ("build-only skips fetch and upstream dependence", test_build_only_does_not_fetch_or_need_upstream),
         ("CI-only push with available upstream does not sync/build/release", test_ci_only_push_ignores_available_upstream),
+        ("runtime Markdown asset-only push opens build gate", test_runtime_markdown_asset_only_push_opens_build_gate),
     ]
     failures = []
     with tempfile.TemporaryDirectory(prefix="rikka-sync-behavior-") as td:

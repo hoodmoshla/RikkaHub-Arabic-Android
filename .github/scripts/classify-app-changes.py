@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Print true if a Git diff touches an app file, false for CI/docs/Markdown only.
+"""Print true if a Git diff touches an app/runtime file, false for CI/docs/Markdown only.
 
 Renames are deliberately disabled so Git reports both the old and new paths;
 deletes remain visible. NUL-delimited paths preserve unusual filenames. Any Git
@@ -13,12 +13,20 @@ import sys
 
 
 def is_app_path(path: bytes) -> bool:
-    # Match the workflow's established exclusion policy using raw path bytes.
-    return not (
-        path.startswith(b".github/")
-        or path.startswith(b"docs/")
-        or path.endswith(b".md")
+    # CI and documentation are always excluded, even if their paths resemble runtime.
+    if path.startswith((b".github/", b"docs/")):
+        return False
+
+    # Markdown under shipped runtime assets is app content, not documentation.
+    runtime_asset = (
+        path.startswith(b"src/main/")
+        or b"/src/main/" in path
+        or path.startswith(b"web-ui/public/")
     )
+    if runtime_asset:
+        return True
+
+    return not path.endswith(b".md")
 
 
 def git_paths(args: list[str]) -> list[bytes]:
