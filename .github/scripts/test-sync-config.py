@@ -121,6 +121,47 @@ def main():
     check("CI-only push is excluded from sync and build planning",
           'IS_PUSH" = true ] && [ "$APP_CHANGED" != true' in by_prefix("B) Decide phase")["run"] and
           'CI/docs-only push: skip sync, build, and release.' in by_prefix("B) Decide phase")["run"])
+    fetch_run = fetch_step["run"]
+    plan_run = by_prefix("B) Decide phase")["run"]
+    classifier_text = (ROOT / ".github/scripts/classify-app-changes.py").read_text()
+    check("upstream app-change classification uses merge-base and shared path policy",
+          'git merge-base upstream/master HEAD' in fetch_run and
+          'classify-app-changes.py "$MERGE_BASE" "$UPSTREAM_SHA"' in fetch_run and
+          'has_upstream_app_changes=$UPSTREAM_APP_CHANGED' in fetch_run and
+          'path.startswith(b".github/")' in classifier_text and
+          'path.startswith(b"docs/")' in classifier_text and 'path.endswith(b".md")' in classifier_text and
+          by_prefix("B) Decide phase")["env"].get("FETCH_HAS_UPSTREAM_APP_CHANGES") ==
+          "${{ steps.fetch_upstream.outputs.has_upstream_app_changes }}")
+    check("auto sync skips upstream CI/docs-only unless force_sync is explicit",
+          'UPSTREAM_APP_CHANGED="${FETCH_HAS_UPSTREAM_APP_CHANGES:-false}"' in plan_run and
+          '[ "$UPSTREAM_APP_CHANGED" != true ] && [ "$FORCE_SYNC" != true' in plan_run and
+          "Upstream changes are CI/docs-only; skip automatic sync and build." in plan_run)
+    check("upstream and push filters use the fail-closed real-Git classifier, not grep -q",
+          "classify-app-changes.py" in fetch_run and "classify-app-changes.py" in plan_run and
+          "--no-renames" in plan_run and "grep -q" not in fetch_run + plan_run)
+    check("push classifier rejects unavailable before/after commits",
+          'Cannot classify push: AFTER commit is unavailable; failing closed.' in plan_run and
+          'Cannot classify push: BEFORE commit is unavailable; failing closed.' in plan_run)
+
+    pr_path = ROOT / ".github/workflows/pr-python-tests.yml"
+    pr_text = pr_path.read_text()
+    pr_wf = yaml.safe_load(pr_text)
+    pr_triggers = pr_wf.get(True, pr_wf.get("on", {}))
+    pr_steps = pr_wf["jobs"]["python-tests"]["steps"]
+    pr_runs = "\n".join(s.get("run", "") for s in pr_steps)
+    pr_checkout = next((s for s in pr_steps if s.get("uses", "").startswith("actions/checkout@")), {})
+    check("PR Python workflow triggers only for PRs to master and manual dispatch",
+          pr_triggers.get("pull_request", {}).get("branches") == ["master"] and
+          "workflow_dispatch" in pr_triggers)
+    check("PR Python workflow has read-only permissions and no persisted checkout token",
+          pr_wf.get("permissions") == {"contents": "read"} and
+          pr_checkout.get("with", {}).get("persist-credentials") is False)
+    check("PR Python workflow runs existing Python tests only (no APK/release/push actions)",
+          all(cmd in pr_runs for cmd in (
+              "test-sync-config.py", "test-sync-behavior.py", "read-app-version.py --self-test",
+              "verify-apk-upgrade_data.py self-test")) and
+          not any(forbidden in pr_text.lower() for forbidden in
+                  ("gradle", "apksigner", "upload-artifact", "gh release", "git push", "secrets.")))
 
     # Normal state/merge pushes are success-only; the third push is intentionally failure-only.
     for prefix in ("C1) Record blocked upstream state", "M) Push validated upstream merge"):
