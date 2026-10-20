@@ -1742,4 +1742,5 @@ mDNS 주소: .local 호스트네임을 사용하며, IP를 몰라도 같은 네�
   <string name="setting_provider_page_device_code_hint">브라우저에서 이 코드를 확인하세요.</string>
   <string name="setting_provider_page_device_code_reopen">페이지를 다시 열려면 탭하세요</string>
     <string name="chat_page_compress_keep_recent_desc">이 메시지는 압축되지 않고 요약 뒤에 남습니다. 0으로 설정하면 모든 메시지를 압축하여 프롬프트 캐시를 가장 효율적으로 재사용합니다. 대화가 너무 길어 압축할 수 없으면 더 많은 메시지를 남기세요.</string>
+  <string name="setting_provider_page_type_subscription">%s 구독</string>
 </resources>
