@@ -23,9 +23,12 @@ on:
   push:
     branches:
       - master
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
+    paths:
+      - '**'
+      - '!**.md'
+      - '!docs/**'
+      - '**/src/main/**'
+      - 'web-ui/public/**'
   schedule:
     - cron: '0 */6 * * *'
   workflow_dispatch:
@@ -121,6 +124,9 @@ jobs:
           MERGE_BASE=$(git merge-base upstream/master HEAD)
           echo "upstream_sha=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
 
+          UPSTREAM_APP_CHANGED=$(python3 .github/scripts/classify-app-changes.py "$MERGE_BASE" "$UPSTREAM_SHA")
+          echo "has_upstream_app_changes=$UPSTREAM_APP_CHANGED" >> "$GITHUB_OUTPUT"
+
           if [ "$UPSTREAM_SHA" != "$MERGE_BASE" ]; then
             echo "has_new_upstream=true" >> "$GITHUB_OUTPUT"
           else
@@ -137,6 +143,7 @@ jobs:
           INPUT_FORCE_BUILD: ${{ inputs.force_build }}
           INPUT_FORCE_SYNC: ${{ inputs.force_sync }}
           FETCH_HAS_NEW_UPSTREAM: ${{ steps.fetch_upstream.outputs.has_new_upstream }}
+          FETCH_HAS_UPSTREAM_APP_CHANGES: ${{ steps.fetch_upstream.outputs.has_upstream_app_changes }}
           FETCH_UPSTREAM_SHA: ${{ steps.fetch_upstream.outputs.upstream_sha }}
           PUSH_BEFORE: ${{ github.event.before }}
           PUSH_AFTER: ${{ github.event.after }}
@@ -149,6 +156,7 @@ jobs:
           FORCE_SYNC="${INPUT_FORCE_SYNC:-false}"
           MODE="${INPUT_MODE:-auto}"
           HAS_NEW="${FETCH_HAS_NEW_UPSTREAM:-false}"
+          UPSTREAM_APP_CHANGED="${FETCH_HAS_UPSTREAM_APP_CHANGES:-false}"
           UPSTREAM_SHA="${FETCH_UPSTREAM_SHA:-}"
 
           BLOCKED_SHA=""
@@ -162,14 +170,19 @@ jobs:
           if [ "$IS_PUSH" = true ]; then
             BEFORE="${PUSH_BEFORE:-}"
             AFTER="${PUSH_AFTER:-}"
-            if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
-               && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-              CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" 2>/dev/null || true)
-            elif [ -n "$AFTER" ] && git cat-file -e "$AFTER^{commit}" 2>/dev/null; then
-              CHANGED=$(git diff-tree --no-commit-id --name-only -r "$AFTER" 2>/dev/null || true)
-            fi
-            if printf '%s\n' "$CHANGED" | grep -vE '^([.]github/|docs/)|\.md$' | grep -q .; then
-              APP_CHANGED=true
+            if [ -z "$AFTER" ] || ! git cat-file -e "$AFTER^{commit}" 2>/dev/null; then
+              echo "Cannot classify push: AFTER commit is unavailable; failing closed." >&2
+              exit 1
+            elif [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+              if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+                echo "Cannot classify push: BEFORE commit is unavailable; failing closed." >&2
+                exit 1
+              fi
+              CHANGED=$(git diff --no-renames --name-only "$BEFORE" "$AFTER")
+              APP_CHANGED=$(python3 .github/scripts/classify-app-changes.py "$BEFORE" "$AFTER")
+            else
+              CHANGED=$(git diff-tree --root --no-commit-id --name-only --no-renames -r "$AFTER")
+              APP_CHANGED=$(python3 .github/scripts/classify-app-changes.py --commit "$AFTER")
             fi
             echo "Push non-CI app changes: $APP_CHANGED"
             printf '%s\n' "$CHANGED" | sed 's/^/  changed: /'
@@ -185,6 +198,8 @@ jobs:
             if [ -n "$BLOCKED_SHA" ] && [ "$BLOCKED_SHA" = "$UPSTREAM_SHA" ] && [ "$FORCE_SYNC" != true ]; then
               BLOCKED_CURRENT=true
               echo "Upstream $UPSTREAM_SHA is already blocked; force_sync=true is required to retry."
+            elif [ "$UPSTREAM_APP_CHANGED" != true ] && [ "$FORCE_SYNC" != true ]; then
+              echo "Upstream changes are CI/docs-only; skip automatic sync and build."
             else
               SHOULD_SYNC=true
             fi
@@ -213,6 +228,7 @@ jobs:
             echo "| mode | \`$MODE\` |"
             echo "| upstream | \`${UPSTREAM_SHA:-not fetched}\` |"
             echo "| new upstream? | \`$HAS_NEW\` |"
+            echo "| upstream app files changed? | \`$UPSTREAM_APP_CHANGED\` |"
             echo "| app files changed by push? | \`$APP_CHANGED\` |"
             echo "| previously blocked | \`${BLOCKED_SHA:-none}\` |"
             echo "| will sync | \`$SHOULD_SYNC\` |"

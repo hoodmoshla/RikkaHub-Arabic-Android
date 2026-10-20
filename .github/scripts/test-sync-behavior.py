@@ -16,6 +16,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/sync-and-release.yml"
+CLASSIFIER = ROOT / ".github/scripts/classify-app-changes.py"
 STEPS = yaml.safe_load(WORKFLOW.read_text())["jobs"]["pipeline"]["steps"]
 
 
@@ -27,6 +28,42 @@ def step(prefix: str):
 
 def git(cwd: Path, *args: str) -> str:
     return subprocess.check_output(["git", *args], cwd=cwd, text=True, stderr=subprocess.DEVNULL).strip()
+
+
+def classify(repo: Path, *args: str, expect_failure: bool = False) -> str:
+    result = subprocess.run(
+        ["python3", str(CLASSIFIER), *args], cwd=repo, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    if expect_failure:
+        assert result.returncode != 0, "invalid Git input must fail closed"
+    else:
+        assert result.returncode == 0, f"classifier failed: {result.stderr}"
+    return result.stdout.strip()
+
+
+def make_upstream_variant(root: Path, source: Path, base_sha: str, label: str,
+                          files: dict[str, str], deletions: tuple[str, ...] = ()) -> Path:
+    variant = root / f"upstream-{label}-work"
+    subprocess.run(["git", "clone", str(source), str(variant)], check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    git(variant, "config", "user.name", "Sync test")
+    git(variant, "config", "user.email", "sync-test@example.invalid")
+    git(variant, "checkout", "-b", label, base_sha)
+    for name, content in files.items():
+        path = variant / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    for name in deletions:
+        (variant / name).unlink()
+    git(variant, "add", "-A")
+    git(variant, "commit", "-m", f"{label} upstream change")
+    bare = root / f"upstream-{label}.git"
+    subprocess.run(["git", "clone", "--bare", "--single-branch", "--branch", label,
+                    str(variant), str(bare)], check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    git(bare, "branch", "-m", label, "master")
+    return bare
 
 
 def is_ancestor(cwd: Path, commit: str, ref: str) -> bool:
@@ -90,6 +127,8 @@ def fixture(root: Path, conflict: bool = False) -> tuple[Path, Path, Path, str]:
     upstream_work = root / "upstream-work"
     subprocess.run(["git", "clone", str(origin_bare), str(work)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run(["git", "clone", str(upstream_bare), str(upstream_work)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    (work / ".github/scripts").mkdir(parents=True, exist_ok=True)
+    (work / ".github/scripts/classify-app-changes.py").write_bytes(CLASSIFIER.read_bytes())
     for repo in (work, upstream_work):
         git(repo, "config", "user.name", "Sync test")
         git(repo, "config", "user.email", "sync-test@example.invalid")
@@ -126,6 +165,7 @@ def base_env(work: Path, upstream: Path, mode: str = "auto", event: str = "workf
         "INPUT_FORCE_BUILD": "false",
         "INPUT_FORCE_SYNC": "false",
         "FETCH_HAS_NEW_UPSTREAM": "false",
+        "FETCH_HAS_UPSTREAM_APP_CHANGES": "false",
         "FETCH_UPSTREAM_SHA": "",
         "PUSH_BEFORE": "",
         "PUSH_AFTER": "",
@@ -138,6 +178,7 @@ def base_env(work: Path, upstream: Path, mode: str = "auto", event: str = "workf
 def fetch(work: Path, env: dict[str, str]) -> dict[str, str]:
     _, output = run_step("A) Fetch upstream", work, env)
     env["FETCH_HAS_NEW_UPSTREAM"] = output["has_new_upstream"]
+    env["FETCH_HAS_UPSTREAM_APP_CHANGES"] = output["has_upstream_app_changes"]
     env["FETCH_UPSTREAM_SHA"] = output["upstream_sha"]
     return output
 
@@ -190,6 +231,184 @@ def test_clean_auto_and_push(root: Path) -> None:
     push_merge(work, env)
     assert git(work, "rev-parse", "HEAD") == git(origin, "rev-parse", "refs/heads/master")
     assert git(work, "merge-base", "--is-ancestor", env["FETCH_UPSTREAM_SHA"], "HEAD") == ""
+
+
+def test_schedule_no_upstream_update_does_not_sync_or_build(root: Path) -> None:
+    work, origin, upstream, base_sha = fixture(root)
+    subprocess.run(["git", "--git-dir", str(upstream), "update-ref", "refs/heads/master", base_sha], check=True)
+    env = base_env(work, upstream, event="schedule")
+    before_head = git(work, "rev-parse", "HEAD")
+    before_remote = git(origin, "rev-parse", "refs/heads/master")
+    fetched = fetch(work, env)
+    assert fetched["has_new_upstream"] == "false"
+    assert fetched["has_upstream_app_changes"] == "false"
+    p = plan(work, env)
+    assert p["should_sync"] == "false" and p["should_build"] == "false"
+    g = gate(work, env)
+    assert g["do_build"] == "false" and g["publish_release"] == "false"
+    assert git(work, "rev-parse", "HEAD") == before_head
+    assert git(origin, "rev-parse", "refs/heads/master") == before_remote
+
+
+def test_schedule_upstream_app_update_is_merged_and_built(root: Path) -> None:
+    work, origin, upstream, _ = fixture(root)
+    env = base_env(work, upstream, event="schedule")
+    fetched = fetch(work, env)
+    assert fetched["has_new_upstream"] == "true"
+    assert fetched["has_upstream_app_changes"] == "true"
+    p = plan(work, env)
+    assert p["should_sync"] == "true" and p["should_build"] == "false"
+    m = merge(work, env)
+    assert m["merged_upstream"] == "true" and m["blocked"] == "false"
+    g = gate(work, env, m)
+    assert g["do_build"] == "true" and g["publish_release"] == "false"
+    assert git(work, "rev-parse", "HEAD") != git(origin, "rev-parse", "refs/heads/master")
+
+
+def test_schedule_upstream_ci_only_does_not_sync_or_build(root: Path) -> None:
+    work, origin, upstream, base_sha = fixture(root)
+    upstream_work = root / "upstream-work"
+    git(upstream_work, "checkout", "-b", "ci-only", base_sha)
+    (upstream_work / ".github").mkdir()
+    (upstream_work / ".github/ci.yml").write_text("name: Upstream CI only\n")
+    git(upstream_work, "add", ".github/ci.yml")
+    git(upstream_work, "commit", "-m", "CI-only upstream change")
+    ci_upstream = root / "upstream-ci.git"
+    subprocess.run(
+        ["git", "clone", "--bare", "--single-branch", "--branch", "ci-only", str(upstream_work), str(ci_upstream)],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    git(ci_upstream, "branch", "-m", "ci-only", "master")
+
+    env = base_env(work, ci_upstream, event="schedule")
+    before_head = git(work, "rev-parse", "HEAD")
+    before_remote = git(origin, "rev-parse", "refs/heads/master")
+    fetched = fetch(work, env)
+    assert fetched["has_new_upstream"] == "true"
+    assert fetched["has_upstream_app_changes"] == "false"
+    p = plan(work, env)
+    assert p["should_sync"] == "false" and p["should_build"] == "false"
+    g = gate(work, env)
+    assert g["do_build"] == "false" and g["publish_release"] == "false"
+    assert git(work, "rev-parse", "HEAD") == before_head
+    assert git(origin, "rev-parse", "refs/heads/master") == before_remote
+
+    # Explicit manual overrides remain available; force_sync retries the CI-only merge.
+    env.update({"EVENT_NAME": "workflow_dispatch", "INPUT_FORCE_SYNC": "true"})
+    forced = plan(work, env)
+    assert forced["should_sync"] == "true"
+    m = merge(work, env)
+    assert m["merged_upstream"] == "true"
+    assert gate(work, env, m)["do_build"] == "true"
+
+    # force_build alone may build the checked-out ref without syncing upstream.
+    env.update({"INPUT_FORCE_SYNC": "false", "INPUT_FORCE_BUILD": "true"})
+    forced_build = plan(work, env)
+    assert forced_build["should_sync"] == "false" and forced_build["should_build"] == "true"
+    assert gate(work, env)["do_build"] == "true"
+
+
+def test_schedule_upstream_docs_only_does_not_sync_or_build(root: Path) -> None:
+    work, origin, _upstream, base_sha = fixture(root)
+    docs_upstream = make_upstream_variant(
+        root, work, base_sha, "docs-only",
+        {"docs/guide.md": "documentation only\n", "notes/release-notes.md": "notes\n"},
+    )
+    env = base_env(work, docs_upstream, event="schedule")
+    before_head = git(work, "rev-parse", "HEAD")
+    before_remote = git(origin, "rev-parse", "refs/heads/master")
+    fetched = fetch(work, env)
+    assert fetched["has_new_upstream"] == "true"
+    assert fetched["has_upstream_app_changes"] == "false"
+    p = plan(work, env)
+    assert p["should_sync"] == "false" and p["should_build"] == "false"
+    g = gate(work, env)
+    assert g["do_build"] == "false" and g["publish_release"] == "false"
+    assert git(work, "rev-parse", "HEAD") == before_head
+    assert git(origin, "rev-parse", "refs/heads/master") == before_remote
+
+
+def test_schedule_upstream_runtime_markdown_asset_is_merged_and_built(root: Path) -> None:
+    work, origin, _upstream, base_sha = fixture(root)
+    asset_path = "app/src/main/assets/builtin_skills/skill-creator/SKILL.md"
+    asset_upstream = make_upstream_variant(
+        root, work, base_sha, "runtime-markdown-asset",
+        {asset_path: "# Updated built-in skill\n"},
+    )
+    env = base_env(work, asset_upstream, event="schedule")
+    fetched = fetch(work, env)
+    assert fetched["has_new_upstream"] == "true"
+    assert fetched["has_upstream_app_changes"] == "true"
+    p = plan(work, env)
+    assert p["should_sync"] == "true" and p["should_build"] == "false"
+    m = merge(work, env)
+    assert m["merged_upstream"] == "true" and m["blocked"] == "false"
+    g = gate(work, env, m)
+    assert g["do_build"] == "true" and g["publish_release"] == "false"
+    assert (work / asset_path).read_text() == "# Updated built-in skill\n"
+    assert git(work, "rev-parse", "HEAD") != git(origin, "rev-parse", "refs/heads/master")
+
+
+def test_schedule_upstream_mixed_ci_docs_and_app_is_merged_and_built(root: Path) -> None:
+    work, origin, _upstream, base_sha = fixture(root)
+    mixed_upstream = make_upstream_variant(
+        root, work, base_sha, "mixed",
+        {".github/workflows/upstream.yml": "name: upstream CI\n",
+         "docs/guide.md": "documentation\n", "app/src/Main.kt": "package app\n"},
+    )
+    env = base_env(work, mixed_upstream, event="schedule")
+    fetched = fetch(work, env)
+    assert fetched["has_new_upstream"] == "true"
+    assert fetched["has_upstream_app_changes"] == "true"
+    p = plan(work, env)
+    assert p["should_sync"] == "true" and p["should_build"] == "false"
+    m = merge(work, env)
+    assert m["merged_upstream"] == "true" and m["blocked"] == "false"
+    g = gate(work, env, m)
+    assert g["do_build"] == "true" and g["publish_release"] == "false"
+    assert (work / "app/src/Main.kt").exists()
+    assert git(work, "rev-parse", "HEAD") != git(origin, "rev-parse", "refs/heads/master")
+
+
+def test_git_classifier_handles_renames_deletes_and_fail_closed(root: Path) -> None:
+    work, _origin, _upstream, base_sha = fixture(root)
+    git(work, "checkout", "-b", "classifier-cases", base_sha)
+    (work / "app").mkdir()
+    (work / "app/Move.kt").write_text("app code\n")
+    (work / "app/Delete.kt").write_text("app code to delete\n")
+    (work / "docs/old.txt").parent.mkdir(parents=True)
+    (work / "docs/old.txt").write_text("docs\n")
+    git(work, "add", "-A")
+    git(work, "commit", "-m", "seed classifier paths")
+    base = git(work, "rev-parse", "HEAD")
+
+    git(work, "mv", "app/Move.kt", "docs/Move.md")
+    (work / "app/Delete.kt").unlink()
+    (work / "docs/new.txt").write_text("docs addition\n")
+    git(work, "add", "-A")
+    git(work, "commit", "-m", "rename app to docs and delete app source")
+    changed = git(work, "rev-parse", "HEAD")
+    assert classify(work, base, changed) == "true", "old rename path and deleted app path must count"
+
+    git(work, "checkout", "-b", "docs-rename", base)
+    git(work, "mv", "docs/old.txt", "docs/new.md")
+    git(work, "commit", "-m", "rename docs file")
+    docs_rename = git(work, "rev-parse", "HEAD")
+    assert classify(work, base, docs_rename) == "false"
+
+    assert classify(work, "not-a-real-base", docs_rename, expect_failure=True) != "true"
+    assert classify(work, "--commit", base) == "true", "non-excluded root files follow the app-change policy"
+    assert classify(work, "--commit", changed) == "true"
+
+
+def test_upstream_classifier_fails_closed_when_merge_base_or_diff_is_invalid(root: Path) -> None:
+    work, origin, upstream, _base = fixture(root)
+    env = base_env(work, upstream, event="schedule")
+    env["UPSTREAM_REPO"] = str(root / "missing-upstream.git")
+    before = git(work, "rev-parse", "HEAD")
+    run_step("A) Fetch upstream", work, env, expect_failure=True)
+    assert git(work, "rev-parse", "HEAD") == before
+    assert git(origin, "rev-parse", "refs/heads/master") == before
 
 
 def test_sync_only_clean_merge_is_a_true_dry_run(root: Path) -> None:
@@ -398,7 +617,7 @@ def test_build_only_does_not_fetch_or_need_upstream(root: Path) -> None:
 def test_ci_only_push_ignores_available_upstream(root: Path) -> None:
     work, origin, upstream, _ = fixture(root)
     before = git(work, "rev-parse", "HEAD")
-    (work / ".github").mkdir()
+    (work / ".github").mkdir(exist_ok=True)
     (work / ".github/ci-only.yml").write_text("name: CI-only\n")
     git(work, "add", ".github/ci-only.yml")
     git(work, "commit", "-m", "CI-only push")
@@ -415,9 +634,40 @@ def test_ci_only_push_ignores_available_upstream(root: Path) -> None:
     assert git(work, "rev-parse", "HEAD") == git(origin, "rev-parse", "refs/heads/master")
 
 
+def test_runtime_markdown_asset_only_push_opens_build_gate(root: Path) -> None:
+    work, origin, upstream, base_sha = fixture(root)
+    subprocess.run(["git", "--git-dir", str(upstream), "update-ref", "refs/heads/master", base_sha], check=True)
+    before = git(work, "rev-parse", "HEAD")
+    asset_path = "app/src/main/assets/builtin_skills/skill-creator/SKILL.md"
+    asset = work / asset_path
+    asset.parent.mkdir(parents=True, exist_ok=True)
+    asset.write_text("# Runtime skill update\n")
+    git(work, "add", asset_path)
+    git(work, "commit", "-m", "Update built-in skill asset")
+    after = git(work, "rev-parse", "HEAD")
+    git(work, "push", "origin", "master")
+
+    env = base_env(work, upstream, event="push")
+    env.update({"PUSH_BEFORE": before, "PUSH_AFTER": after})
+    fetch(work, env)
+    p = plan(work, env)
+    assert p["app_changed"] == "true" and p["should_build"] == "true"
+    g = gate(work, env)
+    assert g["do_build"] == "true" and g["publish_release"] == "false"
+    assert git(origin, "rev-parse", "refs/heads/master") == after
+
+
 def main() -> None:
     tests = [
         ("clean auto merge is built and pushed only after success", test_clean_auto_and_push),
+        ("schedule with no upstream update does not sync or build", test_schedule_no_upstream_update_does_not_sync_or_build),
+        ("schedule upstream app update is merged and built", test_schedule_upstream_app_update_is_merged_and_built),
+        ("schedule upstream CI-only update does not sync/build absent explicit force", test_schedule_upstream_ci_only_does_not_sync_or_build),
+        ("schedule upstream docs-only update does not sync/build", test_schedule_upstream_docs_only_does_not_sync_or_build),
+        ("schedule upstream runtime Markdown asset is merged and built", test_schedule_upstream_runtime_markdown_asset_is_merged_and_built),
+        ("schedule mixed CI/docs/app upstream update is merged and built", test_schedule_upstream_mixed_ci_docs_and_app_is_merged_and_built),
+        ("real Git classifier handles rename/delete and fails closed", test_git_classifier_handles_renames_deletes_and_fail_closed),
+        ("upstream fetch/classification failure does not degrade into no-update", test_upstream_classifier_fails_closed_when_merge_base_or_diff_is_invalid),
         ("sync-only clean merge leaves state, local commit, and remotes untouched", test_sync_only_clean_merge_is_a_true_dry_run),
         ("sync-only conflict leaves state, local commit, and remotes untouched", test_sync_only_conflict_is_a_true_dry_run),
         ("auto conflict records blocked SHA separately; newer SHA retries", test_auto_conflict_records_state_then_new_sha_retries),
@@ -425,6 +675,7 @@ def main() -> None:
         ("validation failure recorder refuses dry-run/build-only/review/success before writes", test_validation_failure_recorder_refuses_out_of_scope_before_writes),
         ("build-only skips fetch and upstream dependence", test_build_only_does_not_fetch_or_need_upstream),
         ("CI-only push with available upstream does not sync/build/release", test_ci_only_push_ignores_available_upstream),
+        ("runtime Markdown asset-only push opens build gate", test_runtime_markdown_asset_only_push_opens_build_gate),
     ]
     failures = []
     with tempfile.TemporaryDirectory(prefix="rikka-sync-behavior-") as td:
