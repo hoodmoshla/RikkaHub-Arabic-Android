@@ -82,7 +82,7 @@ class UIMessageSerializationTest {
             finishedAt = Instant.parse("2024-01-02T03:04:06Z"),
         )
 
-        val restored = Json.decodeFromString<UIMessagePart>(Json.encodeToString(tool)) as UIMessagePart.Tool
+        val restored = Json.decodeFromString<UIMessagePart>(Json.encodeToString<UIMessagePart>(tool)) as UIMessagePart.Tool
 
         assertEquals(tool.startedAt, restored.startedAt)
         assertEquals(tool.finishedAt, restored.finishedAt)
