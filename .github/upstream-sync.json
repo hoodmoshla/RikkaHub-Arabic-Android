@@ -1,6 +1,6 @@
 {
   "_comment": "State for the Arabic upstream-sync workflow. Written only when an upstream merge is blocked by conflicts, so the 6-hourly schedule does not retry the same failing merge. Clearing 'blockedUpstream' (or running the workflow with force_sync=true) forces a new attempt.",
-  "blockedAt": "2026-10-19T21:59:21.756886+00:00",
+  "blockedAt": "2026-10-20T10:55:35.352647+00:00",
   "blockedFiles": [
     "app/build.gradle.kts",
     "app/schemas/me.rerere.rikkahub.data.db.AppDatabase/31.json",
@@ -15,6 +15,6 @@
     "app/src/main/res/values-zh/strings.xml",
     "app/src/main/res/values/strings.xml"
   ],
-  "blockedUpstream": "e5bb70730b4b2cb06c2e049168a1ecc89d41f536",
+  "blockedUpstream": "5203601f79e61d63a56efb3d277d4e79e25bcc39",
   "lastReviewedUpstream": "101d1272162e9a96ee1fe30a8e517fc0b5b192f6"
 }
