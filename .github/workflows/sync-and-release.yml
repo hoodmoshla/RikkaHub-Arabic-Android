@@ -48,6 +48,9 @@ jobs:
             "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator
           fi
           test -x "$ANDROID_HOME/emulator/emulator"
+          sudo apt-get update -qq
+          sudo apt-get install -y libpulse0 libasound2t64 libnss3 libx11-xcb1 libxcb-cursor0 libxkbcommon-x11-0
+          ldd "$ANDROID_HOME/emulator/qemu/linux-x86_64/qemu-system-x86_64" > upgrade-verification/metadata/runner-emulator-libraries.txt
           "$ANDROID_HOME/emulator/emulator" -version | tee upgrade-verification/metadata/runner-emulator-version.txt
           test -e /dev/kvm
           sudo chmod 666 /dev/kvm
