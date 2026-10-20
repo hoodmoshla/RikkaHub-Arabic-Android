@@ -1,221 +1,815 @@
-name: 'Final upstream delta: signed build and upgrade186 (no publication)'
-permissions:
-  contents: read
-concurrency:
-  group: final-upstream-5203601f
-  cancel-in-progress: false
-jobs:
-  signed-upgrade186:
-    if: github.ref == 'refs/heads/finish/upstream-5203601f' && inputs.publish_release == false && inputs.mode == 'build-only'
-    runs-on: ubuntu-latest
-    timeout-minutes: 65
-    env:
-      CANDIDATE_SHA: 90cbec3e3d68ba1fcdb7187ce231d7e8390935cd
-      EXPECTED_CERT: 27326144bdee8eefa9cd7a39e80c3a5322e8332419b86d4b13cfecbbe9eb7b73
-    steps:
-    - name: Checkout temporary test branch
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        submodules: recursive
-        persist-credentials: false
-    - name: Guard exact candidate sources and inspect installed runner emulator
-      shell: bash
-      run: "set -euo pipefail\nmkdir -p upgrade-verification/metadata\ngit diff --exit-code \"$CANDIDATE_SHA\" HEAD -- . \":!.github\"\ngit rev-parse HEAD\
-        \ > upgrade-verification/metadata/test-sha.txt\necho \"$CANDIDATE_SHA\" > upgrade-verification/metadata/candidate-sha.txt\nprintf 'ANDROID_HOME=%s\\\
-        n' \"$ANDROID_HOME\" | tee upgrade-verification/metadata/runner-sdk.txt\nls -la \"$ANDROID_HOME\" >> upgrade-verification/metadata/runner-sdk.txt\n\
-        command -v emulator >> upgrade-verification/metadata/runner-sdk.txt || true\ntest -e /dev/kvm\nsudo chmod 666 /dev/kvm\nif [ ! -x \"$ANDROID_HOME/emulator/emulator\"\
-        \ ]; then\n  echo 'Installed runner SDK has no emulator executable; installing official SDK emulator component.' | tee -a upgrade-verification/metadata/runner-sdk.txt\n\
-        \  \"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager\" --install emulator\nfi\ntest -x \"$ANDROID_HOME/emulator/emulator\"\nsudo apt-get update\
-        \ -qq\nsudo apt-get install -y libpulse0 libasound2t64 libnss3 libx11-xcb1 libxcb-cursor0 libxkbcommon-x11-0\nldd \"$ANDROID_HOME/emulator/qemu/linux-x86_64/qemu-system-x86_64\"\
-        \ > upgrade-verification/metadata/runner-emulator-libraries.txt\n\"$ANDROID_HOME/emulator/emulator\" -version | tee upgrade-verification/metadata/runner-emulator-version.txt\n\
-        test -e /dev/kvm\nsudo chmod 666 /dev/kvm\n\"$ANDROID_HOME/emulator/emulator\" -accel-check | tee upgrade-verification/metadata/runner-acceleration.txt\n\
-        printf 'mode=build-only\\npublish_release=false\\ncontents_permission=read\\nno_apk_upload=true\\n' > upgrade-verification/metadata/safety.txt\n"
-    - uses: actions/setup-java@v4
-      with:
-        distribution: temurin
-        java-version: '17'
-    - uses: pnpm/action-setup@v4
-      with:
-        version: 11
-    - uses: actions/setup-node@v4
-      with:
-        node-version: 22
-        cache: pnpm
-        cache-dependency-path: web-ui/pnpm-lock.yaml
-    - name: Install web-ui dependencies
-      working-directory: web-ui
-      run: pnpm install --frozen-lockfile
-    - uses: gradle/actions/setup-gradle@v4
-    - name: Prepare UI automation on runner
-      run: python3 -m pip install uiautomator2
-    - name: Fetch exact published stable APK 186
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: 'set -euo pipefail
+name: Sync upstream and release Arabic APK
 
-        mkdir -p previous-apk
+# High level pipeline (each phase is a separate, clearly named step so a failure can be
+# localized precisely):
+#
+#   A. Fetch upstream            -> read-only, never touches the branch
+#   B. Decide                    -> detect new upstream, skip already-blocked SHAs, pick mode
+#   C. Merge (isolated branch)   -> resolve *documented* conflicts, otherwise report + stop
+#   D. Verify upstream contained -> the commit to build must really contain upstream
+#   E. Version                   -> <upstream base>.<run number>
+#   F. Arabic resource check     -> base keys must all have an Arabic translation
+#   G. Protected changes check   -> Arabic/RTL/DB/updater/appId markers must survive
+#   H..L. Tests / sign / build / verify APK
+#   M. Push the validated merge  -> master only, AFTER tests + build + APK verification
+#   N. Publish GitHub Release   -> explicit manual approval gate; disabled by default
+#
+# A merge conflict never fails the run and never damages master: phase C works on an
+# isolated branch, writes a human-readable report to the job summary + an artifact, and
+# records the blocked upstream SHA so the scheduled run does not retry the same failing
+# merge every 6 hours. See .github/SYNC.md for the documented resolution rules.
 
-        gh release download v3.0.0.186 --repo hoodmoshla/RikkaHub-Arabic-Android --pattern app-universal-release.apk --dir previous-apk
-
-        echo ''8487608c734e30e398cd568d75fc781fc9cf80af1d60c36e90e1df00f3e3d2fc  previous-apk/app-universal-release.apk'' | sha256sum -c -
-
-        '
-    - name: F) Validate Arabic resource completeness
-      run: "python3 - <<'PY'\nimport re\nfrom pathlib import Path\ndef keys(p):\n    return set(re.findall(r'<string\\s+name=\"([^\"]+)\"', Path(p).read_text()))\n\
-        base = keys('app/src/main/res/values/strings.xml')\nar = keys('app/src/main/res/values-ar/strings.xml')\nmissing = sorted(base - ar)\nif missing:\n\
-        \    raise SystemExit('Arabic translation missing keys:\\n' + '\\n'.join(missing))\nprint(f'Arabic resource covers {len(base)} base strings')\n\
-        PY\n"
-    - name: G) Validate Arabic integration hooks and protected changes
-      run: 'set -e
-
-        test -f app/src/main/res/values-ar/strings.xml
-
-        grep -q ''AppLanguage.ARABIC'' app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingPreferencesGeneralPage.kt
-
-        grep -q ''AppLocale.wrap'' app/src/main/java/me/rerere/rikkahub/RouteActivity.kt
-
-        grep -q ''android:supportsRtl="true"'' app/src/main/AndroidManifest.xml
-
-        grep -q ''applicationId = "me.rerere.rikkahub.arabic.dev"'' app/build.gradle.kts
-
-        grep -q ''RIKKAHUB_PROVIDER_ID'' app/src/main/java/me/rerere/rikkahub/data/datastore/DefaultProviders.kt
-
-        grep -q ''DEFAULT_AUTO_MODEL_ID'' app/src/main/java/me/rerere/rikkahub/data/datastore/DefaultProviders.kt
-
-        grep -q ''hoodmoshla/RikkaHub-Arabic-Android'' app/src/main/java/me/rerere/rikkahub/utils/UpdateChecker.kt
-
-        test -f app/src/main/java/me/rerere/rikkahub/utils/UpdateCheckWorker.kt
-
-        grep -q ''fun Settings.getConversationAssistant(conversation: Conversation)'' app/src/main/java/me/rerere/rikkahub/data/datastore/PreferencesStore.kt
-
-        grep -q ''fun Settings.resolveWorkspaceId(conversation: Conversation)'' app/src/main/java/me/rerere/rikkahub/data/datastore/PreferencesStore.kt
-
-        grep -q ''fun Settings.resolveChatModel(conversation: Conversation)'' app/src/main/java/me/rerere/rikkahub/data/datastore/PreferencesStore.kt
-
-        test -f app/src/test/java/me/rerere/rikkahub/data/datastore/ConversationScopedSettingsTest.kt
-
-        echo "All protected Arabic-distribution changes are present."
-
-        '
-    - name: Targeted new agent and tool serialization tests
-      run: ./gradlew :ai:test --tests "me.rerere.ai.agent.AgentLoopTest" --tests "me.rerere.ai.ui.UIMessagePartTest" --tests "me.rerere.ai.ui.UIMessageSerializationTest"
-        --tests "me.rerere.ai.ui.MessageToolMigrationTest" --no-daemon
-    - name: Targeted conversation tool cancellation and persistence tests
-      run: ./gradlew :app:testDebugUnitTest --tests "me.rerere.rikkahub.data.model.ConversationMessagesTest" --tests "me.rerere.rikkahub.data.model.ConversationToolCallsTest"
-        --tests "me.rerere.rikkahub.data.repository.ConversationPersistenceTest" --tests "me.rerere.rikkahub.data.datastore.ProviderConfigurationLifecycleTest"
-        --no-daemon
-    - name: Lint changed release UI and source integration
-      run: ./gradlew :app:lintRelease --no-daemon
-    - name: Verify unchanged Room migration sources against tested baseline
-      run: git diff --exit-code 200d3a87 HEAD -- app/schemas app/src/main/java/me/rerere/rikkahub/data/db app/src/androidTest/java/me/rerere/rikkahub/data/db
-    - name: Restore existing Arabic release key for test only
-      env:
-        KEYSTORE_B64: ${{ secrets.ARABIC_DEV_KEYSTORE_B64 }}
-        STORE_PASSWORD: ${{ secrets.ARABIC_DEV_STORE_PASSWORD }}
-        KEY_ALIAS: ${{ secrets.ARABIC_DEV_KEY_ALIAS }}
-        KEY_PASSWORD: ${{ secrets.ARABIC_DEV_KEY_PASSWORD }}
-      run: 'set -euo pipefail
-
-        umask 077
-
-        test -n "$KEYSTORE_B64" && test -n "$STORE_PASSWORD" && test -n "$KEY_ALIAS" && test -n "$KEY_PASSWORD"
-
-        printf ''%s'' "$KEYSTORE_B64" | base64 --decode > arabic-release.keystore
-
-        printf ''storeFile=%s/arabic-release.keystore\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n'' "$GITHUB_WORKSPACE" "$STORE_PASSWORD" "$KEY_ALIAS"
-        "$KEY_PASSWORD" >> local.properties
-
-        '
-    - name: Build exact candidate signed APK without publication
-      run: ./gradlew :app:assembleRelease -PreleaseVersion=3.0.0.193 -PreleaseCode=193 -PreleaseSigned=true --no-daemon
-    - name: Verify identities and original certificate on both APK files
-      shell: bash
-      run: "set -euo pipefail\nBT=$(find \"$ANDROID_HOME/build-tools\" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)\nfor label in stable candidate;\
-        \ do\n  if [ \"$label\" = stable ]; then apk=previous-apk/app-universal-release.apk; expected=186; else apk=app/build/outputs/apk/release/app-universal-release.apk;\
-        \ expected=193; fi\n  \"$BT/apksigner\" verify --print-certs \"$apk\" > \"upgrade-verification/metadata/$label-signature.txt\"\n  cert=$(awk -F':\
-        \ ' '/certificate SHA-256 digest:/ {print $NF}' \"upgrade-verification/metadata/$label-signature.txt\" | tr -d ':' | tr '[:upper:]' '[:lower:]'\
-        \ | sort -u)\n  test \"$cert\" = \"$EXPECTED_CERT\"\n  \"$BT/aapt\" dump badging \"$apk\" > \"upgrade-verification/metadata/$label-package.txt\"\
-        \n  grep -q \"^package: name='me.rerere.rikkahub.arabic.dev' versionCode='$expected'\" \"upgrade-verification/metadata/$label-package.txt\"\n  sha256sum\
-        \ \"$apk\" >> upgrade-verification/metadata/apk-sha256.txt\ndone\nrm -f arabic-release.keystore local.properties\n"
-    - name: Build read-only Android verifier using exact APK native libraries
-      shell: bash
-      run: 'set -euo pipefail
-
-        mkdir -p upgrade-native/stable upgrade-native/candidate
-
-        NDK_CC=$(find "$ANDROID_HOME/ndk" -name x86_64-linux-android26-clang | sort -V | tail -1)
-
-        test -x "$NDK_CC"
-
-        "$NDK_CC" -std=c11 -O2 -Wall -Wextra .github/scripts/android-db-check.c -ldl -o upgrade-native/android-db-check
-
-        unzip -j previous-apk/app-universal-release.apk lib/x86_64/libsqlite3x.so lib/x86_64/libsimple.so -d upgrade-native/stable
-
-        unzip -j app/build/outputs/apk/release/app-universal-release.apk lib/x86_64/libsqlite3x.so lib/x86_64/libsimple.so -d upgrade-native/candidate
-
-        sha256sum upgrade-native/android-db-check upgrade-native/stable/*.so upgrade-native/candidate/*.so > upgrade-verification/metadata/native-library-sha256.txt
-
-        echo ''Exact native libraries extracted from each signed APK; Android verifier opens copied DB read-only; original app database is not modified.''
-        > upgrade-verification/metadata/native-verifier.txt
-
-        '
-    - name: Actual replacement upgrade then UI message send
-      uses: reactivecircus/android-emulator-runner@v2
-      with:
-        api-level: 35
-        target: google_apis
-        arch: x86_64
-        profile: pixel_2
-        disable-animations: true
-        emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -camera-back none
-        script: 'bash .github/scripts/verify-upgrade186.sh
-
-          python3 .github/scripts/send-after-upgrade.py
-
-          '
-    - name: Summarize actual result only
-      if: always()
-      shell: bash
-      run: "{\n  echo '## Temporary signed upgrade186 test: no publication'\n  echo 'Candidate production source: 90cbec3e3d68ba1fcdb7187ce231d7e8390935cd'\n\
-        \  echo 'Send test uses local mock OpenAI endpoint, not external AI service.'\n  echo 'No release, merge, or Git push step exists; verified APK\
-        \ staged for authorized release.'\n  find upgrade-verification \\( -name '*result*.json' -o -name result.txt \\) | while read -r f; do echo \"###\
-        \ $f\"; cat \"$f\"; done\n} >> \"$GITHUB_STEP_SUMMARY\"\n"
-    - name: Upload synthetic evidence only, never APK or signing files
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: signed-upgrade186-evidence
-        path: upgrade-verification/
-        retention-days: 14
-        if-no-files-found: error
-    - name: Stage exact verified signed universal APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: RikkaHub-Arabic-Release-APK-193
-        path: app/build/outputs/apk/release/app-universal-release.apk
-        if-no-files-found: error
-    - name: Upload targeted test and lint reports
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: delta-test-lint-reports
-        path: '**/build/test-results/
-
-          app/build/reports/lint-results*'
-        if-no-files-found: warn
-    - name: Remove test APK and signing files
-      if: always()
-      run: rm -f arabic-release.keystore local.properties app/build/outputs/apk/release/*.apk previous-apk/*.apk
-'on':
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - '**'
+      - '!**.md'
+      - '!docs/**'
+      - '**/src/main/**'
+      - 'web-ui/public/**'
+  schedule:
+    - cron: '0 */6 * * *'
   workflow_dispatch:
     inputs:
-      publish_release:
-        type: boolean
-        default: false
-        description: Must remain false
       mode:
+        description: 'auto = sync then build; sync-only = only try to sync; build-only = build the dispatched branch'
         type: choice
         options:
-        - build-only
-        default: build-only
+          - auto
+          - sync-only
+          - build-only
+        default: auto
+      force_build:
+        description: 'Force a build/release even if nothing changed'
+        required: false
+        type: boolean
+        default: false
+      force_sync:
+        description: 'Retry the merge even for an upstream SHA previously recorded as blocked'
+        required: false
+        type: boolean
+        default: false
+      publish_release:
+        description: 'Publish a GitHub Release only after explicit approval (dispatch on master only)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  TARGET_REPO: hoodmoshla/RikkaHub-Arabic-Android
+  UPSTREAM_REPO: https://github.com/rikkahub/rikkahub.git
+  STATE_FILE: .github/upstream-sync.json
+  # Files whose upstream version must never replace ours: these belong to the Arabic
+  # distribution's own CI (upstream's CI targets the official repo, a different
+  # applicationId and signing). Documented rule, see .github/SYNC.md.
+  OURS_ON_CONFLICT: '^\.github/workflows/'
+  # Files that must never be auto-resolved: any conflict here stops the sync and is
+  # reported for human review (Arabic UI/RTL, app identity, DB/Room, updater, protected
+  # Arabic features). Keep in sync with .github/SYNC.md.
+  PROTECTED_PATTERNS: 'values-ar/|values/strings\.xml|AppLocale\.kt|RouteActivity\.kt|AndroidManifest\.xml|app/build\.gradle\.kts|DefaultProviders\.kt|SettingPreferencesGeneralPage\.kt|UpdateChecker\.kt|UpdateCard\.kt|UpdateCheckWorker\.kt|UpdateDownload|PreferencesStore\.kt|Conversation\.kt|ConversationEntity\.kt|ConversationRepository\.kt|ChatService\.kt|ChatVM\.kt|ChatPage\.kt|ChatInput\.kt|AppDatabase|schemas/|rikkahub\.keep|ConversationScopedSettingsTest\.kt|ConversationPersistenceTest\.kt'
+
+concurrency:
+  group: arabic-upstream-release
+  cancel-in-progress: false
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      # ---- A. Checkout ----------------------------------------------------------------
+      # Every manual mode uses the selected dispatch ref. Scheduled/push runs use master.
+      - name: Checkout Arabic fork (master or selected dispatch ref)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || 'master' }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Configure Git identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Set up Python for sync safety tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install sync test parser dependency
+        run: python -m pip install --disable-pip-version-check PyYAML
+
+      - name: Run static and real-git sync safety tests
+        run: |
+          python3 .github/scripts/test-sync-config.py
+          python3 .github/scripts/test-sync-behavior.py
+          python3 .github/scripts/read-app-version.py --self-test
+          python3 .github/scripts/verify-apk-upgrade_data.py self-test
+
+      # ---- A. Fetch upstream (read-only) ---------------------------------------------
+      # Build-only is deliberately independent of the upstream remote and version tags.
+      - name: 'A) Fetch upstream'
+        id: fetch_upstream
+        if: github.event_name != 'workflow_dispatch' || inputs.mode != 'build-only'
+        run: |
+          set -euo pipefail
+          git remote add upstream "$UPSTREAM_REPO" || true
+          git fetch upstream master --tags
+
+          UPSTREAM_SHA=$(git rev-parse upstream/master)
+          MERGE_BASE=$(git merge-base upstream/master HEAD)
+          echo "upstream_sha=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
+
+          UPSTREAM_APP_CHANGED=$(python3 .github/scripts/classify-app-changes.py "$MERGE_BASE" "$UPSTREAM_SHA")
+          echo "has_upstream_app_changes=$UPSTREAM_APP_CHANGED" >> "$GITHUB_OUTPUT"
+
+          if [ "$UPSTREAM_SHA" != "$MERGE_BASE" ]; then
+            echo "has_new_upstream=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_new_upstream=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Upstream: $UPSTREAM_SHA / merge-base: $MERGE_BASE"
+
+      # ---- B. Decide what this run should do -----------------------------------------
+      - name: 'B) Decide phase (mode / blocked state)'
+        id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_FORCE_BUILD: ${{ inputs.force_build }}
+          INPUT_FORCE_SYNC: ${{ inputs.force_sync }}
+          FETCH_HAS_NEW_UPSTREAM: ${{ steps.fetch_upstream.outputs.has_new_upstream }}
+          FETCH_HAS_UPSTREAM_APP_CHANGES: ${{ steps.fetch_upstream.outputs.has_upstream_app_changes }}
+          FETCH_UPSTREAM_SHA: ${{ steps.fetch_upstream.outputs.upstream_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
+          WORKFLOW_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          IS_PUSH=false
+          [ "$EVENT_NAME" = "push" ] && IS_PUSH=true || true
+          FORCE="${INPUT_FORCE_BUILD:-false}"
+          FORCE_SYNC="${INPUT_FORCE_SYNC:-false}"
+          MODE="${INPUT_MODE:-auto}"
+          HAS_NEW="${FETCH_HAS_NEW_UPSTREAM:-false}"
+          UPSTREAM_APP_CHANGED="${FETCH_HAS_UPSTREAM_APP_CHANGES:-false}"
+          UPSTREAM_SHA="${FETCH_UPSTREAM_SHA:-}"
+
+          BLOCKED_SHA=""
+          if [ -f "$STATE_FILE" ]; then
+            BLOCKED_SHA=$(python3 -c "import json; print(json.load(open('$STATE_FILE')).get('blockedUpstream',''))" 2>/dev/null || echo "")
+          fi
+          echo "Blocked upstream SHA recorded previously: '${BLOCKED_SHA}'"
+
+          APP_CHANGED=false
+          CHANGED=""
+          if [ "$IS_PUSH" = true ]; then
+            BEFORE="${PUSH_BEFORE:-}"
+            AFTER="${PUSH_AFTER:-}"
+            if [ -z "$AFTER" ] || ! git cat-file -e "$AFTER^{commit}" 2>/dev/null; then
+              echo "Cannot classify push: AFTER commit is unavailable; failing closed." >&2
+              exit 1
+            elif [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+              if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+                echo "Cannot classify push: BEFORE commit is unavailable; failing closed." >&2
+                exit 1
+              fi
+              CHANGED=$(git diff --no-renames --name-only "$BEFORE" "$AFTER")
+              APP_CHANGED=$(python3 .github/scripts/classify-app-changes.py "$BEFORE" "$AFTER")
+            else
+              CHANGED=$(git diff-tree --root --no-commit-id --name-only --no-renames -r "$AFTER")
+              APP_CHANGED=$(python3 .github/scripts/classify-app-changes.py --commit "$AFTER")
+            fi
+            echo "Push non-CI app changes: $APP_CHANGED"
+            printf '%s\n' "$CHANGED" | sed 's/^/  changed: /'
+          fi
+
+          SHOULD_SYNC=false
+          BLOCKED_CURRENT=false
+          if [ "$MODE" = "build-only" ]; then
+            echo "Mode=build-only: no upstream fetch or merge is needed."
+          elif [ "$IS_PUSH" = true ] && [ "$APP_CHANGED" != true ]; then
+            echo "CI/docs-only push: skip sync, build, and release."
+          elif [ "$HAS_NEW" = true ]; then
+            if [ -n "$BLOCKED_SHA" ] && [ "$BLOCKED_SHA" = "$UPSTREAM_SHA" ] && [ "$FORCE_SYNC" != true ]; then
+              BLOCKED_CURRENT=true
+              echo "Upstream $UPSTREAM_SHA is already blocked; force_sync=true is required to retry."
+            elif [ "$UPSTREAM_APP_CHANGED" != true ] && [ "$FORCE_SYNC" != true ]; then
+              echo "Upstream changes are CI/docs-only; skip automatic sync and build."
+            else
+              SHOULD_SYNC=true
+            fi
+          else
+            echo "No new upstream commits: nothing to sync."
+          fi
+
+          SHOULD_BUILD=false
+          if [ "$MODE" = "build-only" ] || [ "$FORCE" = true ]; then
+            SHOULD_BUILD=true
+          elif [ "$IS_PUSH" = true ] && [ "$APP_CHANGED" = true ]; then
+            SHOULD_BUILD=true
+          fi
+
+          echo "should_sync=$SHOULD_SYNC" >> "$GITHUB_OUTPUT"
+          echo "should_build=$SHOULD_BUILD" >> "$GITHUB_OUTPUT"
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "force_build=$FORCE" >> "$GITHUB_OUTPUT"
+          echo "app_changed=$APP_CHANGED" >> "$GITHUB_OUTPUT"
+          echo "upstream_blocked=$BLOCKED_CURRENT" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Sync plan"
+            echo "| key | value |"
+            echo "| --- | --- |"
+            echo "| trigger | \`$EVENT_NAME\` |"
+            echo "| mode | \`$MODE\` |"
+            echo "| upstream | \`${UPSTREAM_SHA:-not fetched}\` |"
+            echo "| new upstream? | \`$HAS_NEW\` |"
+            echo "| upstream app files changed? | \`$UPSTREAM_APP_CHANGED\` |"
+            echo "| app files changed by push? | \`$APP_CHANGED\` |"
+            echo "| previously blocked | \`${BLOCKED_SHA:-none}\` |"
+            echo "| will sync | \`$SHOULD_SYNC\` |"
+            echo "| will build | \`$SHOULD_BUILD\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ---- C. Merge on an isolated branch (never directly on master) -----------------
+      - name: 'C) Attempt upstream merge (isolated branch)'
+        id: merge
+        if: steps.plan.outputs.should_sync == 'true'
+        env:
+          UPSTREAM_SHA: ${{ steps.fetch_upstream.outputs.upstream_sha }}
+          MODE: ${{ steps.plan.outputs.mode }}
+        run: |
+          set -euo pipefail
+          UPSTREAM_SHORT=$(git rev-parse --short "$UPSTREAM_SHA")
+          echo "merged_upstream=false" >> "$GITHUB_OUTPUT"
+          echo "blocked=false" >> "$GITHUB_OUTPUT"
+
+          # Work only in an isolated branch; dry-run will abort without a local commit.
+          git switch -c "sync/upstream-$UPSTREAM_SHORT"
+
+          if git merge upstream/master --no-commit --no-ff; then
+            if [ "$MODE" = "sync-only" ]; then
+              git merge --abort
+              echo "Sync-only dry run: clean merge candidate; no local commit was created."
+              echo "Clean merge candidate with upstream $UPSTREAM_SHORT (dry-run; not committed)." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            git commit -m "chore(upstream): sync and merge upstream/master ($UPSTREAM_SHORT)"
+            echo "merged_upstream=true" >> "$GITHUB_OUTPUT"
+            echo "Clean merge with upstream $UPSTREAM_SHORT." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "conflicted_files=$(git diff --name-only --diff-filter=U | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            if printf '%s' "$f" | grep -Eq "$OURS_ON_CONFLICT"; then
+              git checkout --ours -- "$f" && git add -- "$f"
+              echo "Auto-resolved (keep ours, documented rule): $f"
+            fi
+          done < <(git diff --name-only --diff-filter=U)
+
+          REMAINING=$(git diff --name-only --diff-filter=U)
+          if [ -z "$REMAINING" ]; then
+            if [ "$MODE" = "sync-only" ]; then
+              git merge --abort
+              echo "Sync-only dry run: conflict policy yielded a clean candidate; no local commit was created."
+              exit 0
+            fi
+            git commit -m "chore(upstream): sync and merge upstream/master ($UPSTREAM_SHORT)"
+            echo "merged_upstream=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "blocked=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Upstream sync blocked (human review required)"
+            echo
+            echo "**Upstream:** \`$UPSTREAM_SHA\` (\`$UPSTREAM_SHORT\`)"
+            echo
+            echo "The following files conflict and were not modified:"
+            echo
+            echo '```'
+            echo "$REMAINING"
+            echo '```'
+            echo
+            echo "**Protected matches:**"
+            echo '```'
+            echo "$REMAINING" | grep -E "$PROTECTED_PATTERNS" || echo "(none)"
+            echo '```'
+            echo
+            echo "Nothing was pushed; the merge was aborted."
+          } >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p sync-report
+          printf '%s\n' "$REMAINING" > sync-report/conflicted-files.txt
+          git diff -U0 >> sync-report/conflict-details.diff 2>&1 || true
+          git merge --abort || true
+          echo "blocked_upstream_sha=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
+          echo "Master left unchanged (conflicts isolated); no state was written by the merge step."
+
+      - name: Upload sync conflict report
+        if: steps.merge.outputs.blocked == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-sync-report
+          path: sync-report/
+
+      # State writes are intentionally separate and production-only. Dry-run never reaches this.
+      - name: 'C1) Record blocked upstream state'
+        id: record_blocked
+        if: success() && steps.plan.outputs.mode == 'auto' && github.ref == 'refs/heads/master' && steps.merge.outputs.blocked == 'true'
+        env:
+          MODE: ${{ steps.plan.outputs.mode }}
+          WORKFLOW_REF: ${{ github.ref }}
+          JOB_STATUS: ${{ job.status }}
+          UPSTREAM_SHA: ${{ steps.merge.outputs.blocked_upstream_sha }}
+        run: |
+          set -euo pipefail
+          test "$MODE" = auto
+          test "$WORKFLOW_REF" = refs/heads/master
+          test "$JOB_STATUS" = success
+          test -n "$UPSTREAM_SHA"
+          python3 - "$UPSTREAM_SHA" <<'PY'
+          import json, os, sys, datetime
+          sha = sys.argv[1]
+          path = os.environ["STATE_FILE"]
+          with open("sync-report/conflicted-files.txt") as f:
+              files = [line.strip() for line in f if line.strip()]
+          try:
+              with open(path) as f:
+                  state = json.load(f)
+          except (FileNotFoundError, json.JSONDecodeError):
+              state = {}
+          state["blockedUpstream"] = sha
+          state["blockedFiles"] = files
+          state["blockedAt"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+          with open(path, "w") as f:
+              json.dump(state, f, indent=2, sort_keys=True)
+              f.write("\n")
+          PY
+          git add "$STATE_FILE"
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(sync): record blocked upstream $(git rev-parse --short "$UPSTREAM_SHA") [skip ci]"
+            test "$MODE" = auto && test "$WORKFLOW_REF" = refs/heads/master && test "$JOB_STATUS" = success
+            git push origin HEAD:master
+          fi
+
+      # ---- C2. Gate: runs only if all prior steps succeeded ---------------------------
+      - name: 'C2) Gate build/release'
+        id: gate
+        if: success()
+        env:
+          BLOCKED: ${{ steps.merge.outputs.blocked == 'true' || steps.plan.outputs.upstream_blocked == 'true' }}
+          MERGED: ${{ steps.merge.outputs.merged_upstream }}
+          CURRENT: ${{ steps.plan.outputs.should_build }}
+          MODE: ${{ steps.plan.outputs.mode }}
+          FORCE_BUILD: ${{ steps.plan.outputs.force_build }}
+          APP_CHANGED: ${{ steps.plan.outputs.app_changed }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_REF: ${{ github.ref }}
+          INPUT_PUBLISH_RELEASE: ${{ inputs.publish_release }}
+        run: |
+          set -euo pipefail
+          BLOCKED="${BLOCKED:-false}"
+          MERGED="${MERGED:-false}"
+          CURRENT="${CURRENT:-false}"
+          MODE="${MODE:-auto}"
+          FORCE_BUILD="${FORCE_BUILD:-false}"
+          APP_CHANGED="${APP_CHANGED:-false}"
+          DO_BUILD=false
+          DO_PUBLISH=false
+          if [ "$MODE" = sync-only ]; then
+            DO_BUILD=false
+          elif [ "$MODE" = build-only ]; then
+            DO_BUILD=true
+          elif [ "$BLOCKED" = true ]; then
+            # Never build or publish an unresolved automatic sync, even when forced.
+            DO_BUILD=false
+          elif [ "$EVENT_NAME" = push ] && [ "$APP_CHANGED" != true ]; then
+            DO_BUILD=false
+          elif [ "$CURRENT" = true ] || [ "$MERGED" = true ]; then
+            DO_BUILD=true
+          fi
+          if [ "$DO_BUILD" = true ] && [ "$EVENT_NAME" = workflow_dispatch ] \
+             && [ "${INPUT_PUBLISH_RELEASE:-false}" = true ] \
+             && [ "$WORKFLOW_REF" = refs/heads/master ]; then
+            DO_PUBLISH=true
+          fi
+          echo "do_build=$DO_BUILD" >> "$GITHUB_OUTPUT"
+          echo "publish_release=$DO_PUBLISH" >> "$GITHUB_OUTPUT"
+          echo "gate: mode=$MODE merged=$MERGED blocked=$BLOCKED force_build=$FORCE_BUILD -> do_build=$DO_BUILD publish_release=$DO_PUBLISH"
+
+      # ---- D. Hard invariant: the built commit must contain upstream -----------------
+      - name: 'D) Verify official upstream is contained'
+        id: upstream_check
+        if: steps.gate.outputs.do_build == 'true' && steps.plan.outputs.mode != 'build-only'
+        env:
+          MERGED_UPSTREAM: ${{ steps.merge.outputs.merged_upstream }}
+        run: |
+          if [ "${MERGED_UPSTREAM:-false}" = "true" ]; then
+            if ! git merge-base --is-ancestor upstream/master HEAD; then
+              echo "::error::upstream/master is NOT contained in the commit that would be built."
+              exit 1
+            fi
+            echo "upstream_short=$(git rev-parse --short upstream/master)" >> "$GITHUB_OUTPUT"
+            echo "OK: the commit to be built contains official upstream $(git rev-parse --short upstream/master)"
+          elif git merge-base --is-ancestor upstream/master HEAD; then
+            echo "upstream_short=$(git rev-parse --short upstream/master)" >> "$GITHUB_OUTPUT"
+            echo "Checked-out ref contains official upstream $(git rev-parse --short upstream/master)"
+          else
+            LATEST=$(git log -1 --format=%s -E --grep="sync and merge upstream/master" || true)
+            SHORT=$(printf '%s' "$LATEST" | sed -n 's/.*(\([0-9a-f]\{7,\}\)).*/\1/p')
+            echo "upstream_short=${SHORT:-unknown}" >> "$GITHUB_OUTPUT"
+            echo "Building checked-out ref $GITHUB_REF_NAME; last recorded upstream: ${SHORT:-unknown}"
+          fi
+
+      # ---- E. Release version ---------------------------------------------------------
+      - name: 'E) Determine Release Version'
+        id: version_step
+        if: steps.gate.outputs.do_build == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.plan.outputs.mode }}" = build-only ]; then
+            BASE_VERSION=$(python3 .github/scripts/read-app-version.py app/build.gradle.kts)
+          else
+            BASE_VERSION=$(git show upstream/master:app/build.gradle.kts | python3 .github/scripts/read-app-version.py -)
+          fi
+          RUN_NUM="${{ github.run_number }}"
+          LAST_RELEASE_TAG=$(gh release list --repo "$TARGET_REPO" --limit 1 --json tagName --jq '.[0].tagName // ""')
+          LAST_RELEASE_CODE=0
+          if [ -n "$LAST_RELEASE_TAG" ]; then
+            if [[ "$LAST_RELEASE_TAG" =~ ^v?[0-9]+(\.[0-9]+)*\.([0-9]+)$ ]]; then
+              LAST_RELEASE_CODE="${BASH_REMATCH[2]}"
+            else
+              echo "::error::Cannot establish monotonic versionCode from latest release tag: $LAST_RELEASE_TAG"
+              exit 1
+            fi
+          fi
+          RELEASE_CODE="$RUN_NUM"
+          if [ "$RELEASE_CODE" -le "$LAST_RELEASE_CODE" ]; then
+            RELEASE_CODE=$((LAST_RELEASE_CODE + 1))
+          fi
+          RELEASE_VERSION="${BASE_VERSION}.${RELEASE_CODE}"
+          echo "release_version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "release_code=$RELEASE_CODE" >> "$GITHUB_OUTPUT"
+          echo "Resolved Release Version: $RELEASE_VERSION (code $RELEASE_CODE; previous release tag ${LAST_RELEASE_TAG:-none}, code $LAST_RELEASE_CODE)"
+
+      # ---- F. Arabic resource completeness -------------------------------------------
+      - name: 'F) Validate Arabic resource completeness'
+        if: steps.gate.outputs.do_build == 'true'
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          def keys(p):
+              return set(re.findall(r'<string\s+name="([^"]+)"', Path(p).read_text()))
+          base = keys('app/src/main/res/values/strings.xml')
+          ar = keys('app/src/main/res/values-ar/strings.xml')
+          missing = sorted(base - ar)
+          if missing:
+              raise SystemExit('Arabic translation missing keys:\n' + '\n'.join(missing))
+          print(f'Arabic resource covers {len(base)} base strings')
+          PY
+
+      # ---- G. Protected Arabic-distribution invariants -------------------------------
+      - name: 'G) Validate Arabic integration hooks and protected changes'
+        if: steps.gate.outputs.do_build == 'true'
+        run: |
+          set -e
+          test -f app/src/main/res/values-ar/strings.xml
+          grep -q 'AppLanguage.ARABIC' app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingPreferencesGeneralPage.kt
+          grep -q 'AppLocale.wrap' app/src/main/java/me/rerere/rikkahub/RouteActivity.kt
+          grep -q 'android:supportsRtl="true"' app/src/main/AndroidManifest.xml
+          grep -q 'applicationId = "me.rerere.rikkahub.arabic.dev"' app/build.gradle.kts
+          grep -q 'RIKKAHUB_PROVIDER_ID' app/src/main/java/me/rerere/rikkahub/data/datastore/DefaultProviders.kt
+          grep -q 'DEFAULT_AUTO_MODEL_ID' app/src/main/java/me/rerere/rikkahub/data/datastore/DefaultProviders.kt
+          grep -q 'hoodmoshla/RikkaHub-Arabic-Android' app/src/main/java/me/rerere/rikkahub/utils/UpdateChecker.kt
+          test -f app/src/main/java/me/rerere/rikkahub/utils/UpdateCheckWorker.kt
+          grep -q 'fun Settings.getConversationAssistant(conversation: Conversation)' app/src/main/java/me/rerere/rikkahub/data/datastore/PreferencesStore.kt
+          grep -q 'fun Settings.resolveWorkspaceId(conversation: Conversation)' app/src/main/java/me/rerere/rikkahub/data/datastore/PreferencesStore.kt
+          grep -q 'fun Settings.resolveChatModel(conversation: Conversation)' app/src/main/java/me/rerere/rikkahub/data/datastore/PreferencesStore.kt
+          test -f app/src/test/java/me/rerere/rikkahub/data/datastore/ConversationScopedSettingsTest.kt
+          echo "All protected Arabic-distribution changes are present."
+
+      # ---- H. Toolchains --------------------------------------------------------------
+      - name: 'H) Set up Java / pnpm / Node / Gradle'
+        if: steps.gate.outputs.do_build == 'true'
+        run: echo "toolchains are configured in the next steps"
+
+      - name: Set up Java
+        if: steps.gate.outputs.do_build == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up pnpm
+        if: steps.gate.outputs.do_build == 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Set up Node
+        if: steps.gate.outputs.do_build == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web-ui/pnpm-lock.yaml
+
+      - name: Install web-ui dependencies
+        if: steps.gate.outputs.do_build == 'true'
+        working-directory: web-ui
+        run: pnpm install --frozen-lockfile
+
+      - name: Set up Gradle
+        if: steps.gate.outputs.do_build == 'true'
+        uses: gradle/actions/setup-gradle@v4
+
+      # ---- I. JVM tests / lint / Room instrumentation -------------------------------
+      # AGP exposes app tests for Debug in this project. Exercise those plus every library
+      # JVM suite; Release is separately compiled by lintRelease and assembleRelease.
+      - name: 'I) Run app JVM unit tests'
+        if: steps.gate.outputs.do_build == 'true'
+        run: ./gradlew :app:testDebugUnitTest --no-daemon :ai:test :common:test :document:test :highlight:test :material3:test :mediagen:test :oauth:test :search:test :speech:test :ui:test :web:test :workspace:test
+
+      - name: 'I2) Run lintRelease'
+        if: steps.gate.outputs.do_build == 'true'
+        run: ./gradlew :app:lintRelease --no-daemon
+
+      - name: Enable KVM for Android emulator
+        if: steps.gate.outputs.do_build == 'true'
+        run: |
+          test -e /dev/kvm || { echo 'GitHub runner does not expose /dev/kvm; emulator tests require KVM.' >&2; exit 1; }
+          sudo chmod 666 /dev/kvm
+
+      - name: 'I3) Run Room instrumentation tests (API 35 x86_64)'
+        if: steps.gate.outputs.do_build == 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon
+
+      # ---- J. Signing -----------------------------------------------------------------
+      - name: 'J) Restore signing key'
+        if: steps.gate.outputs.do_build == 'true'
+        env:
+          KEYSTORE_B64: ${{ secrets.ARABIC_DEV_KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.ARABIC_DEV_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ARABIC_DEV_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ARABIC_DEV_KEY_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE_B64" || (echo 'Missing Arabic dev release signing secrets' >&2; exit 1)
+          echo "$KEYSTORE_B64" | base64 --decode > arabic-release.keystore
+          cat >> local.properties <<EOF
+          storeFile=$GITHUB_WORKSPACE/arabic-release.keystore
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+          keytool -list -v -keystore arabic-release.keystore -storepass "$STORE_PASSWORD"
+
+      # ---- K. Build -------------------------------------------------------------------
+      - name: 'K) Build signed universal APK'
+        id: build_apk
+        if: steps.gate.outputs.do_build == 'true'
+        env:
+          RELEASE_VERSION: ${{ steps.version_step.outputs.release_version }}
+          RELEASE_CODE: ${{ steps.version_step.outputs.release_code }}
+        run: ./gradlew :app:assembleRelease -PreleaseVersion="$RELEASE_VERSION" -PreleaseCode="$RELEASE_CODE" -PreleaseSigned=true
+
+      - name: Upload APK artifact
+        id: upload_apk
+        if: steps.gate.outputs.do_build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: RikkaHub-Arabic-Release-APK
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      # ---- L. Verify APK --------------------------------------------------------------
+      - name: 'L) Verify generated APK integrity (signature + applicationId)'
+        if: steps.gate.outputs.do_build == 'true'
+        env:
+          EXPECTED_VERSION_NAME: ${{ steps.version_step.outputs.release_version }}
+          EXPECTED_VERSION_CODE: ${{ steps.version_step.outputs.release_code }}
+        run: |
+          set -euo pipefail
+          apk_path="app/build/outputs/apk/release/app-universal-release.apk"
+          test -f "$apk_path" || { echo "APK not found at $apk_path" >&2; exit 1; }
+          echo "Checking APK: $apk_path ($(stat -c '%s' "$apk_path") bytes)"
+
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$SDK_ROOT" || { echo 'Android SDK root is not configured.' >&2; exit 1; }
+          BUILD_TOOLS_DIR=$(find "$SDK_ROOT/build-tools" -mindepth 1 -maxdepth 1 -type d -print | sort -V | tail -n 1)
+          test -n "$BUILD_TOOLS_DIR" || { echo 'Android SDK build-tools were not found.' >&2; exit 1; }
+          export PATH="$BUILD_TOOLS_DIR:$PATH"
+          command -v apksigner >/dev/null
+          command -v aapt >/dev/null
+
+          SIGNATURE_REPORT=$(apksigner verify --print-certs "$apk_path")
+          printf '%s\n' "$SIGNATURE_REPORT"
+          CERT_SHA=$(printf '%s\n' "$SIGNATURE_REPORT" | awk -F': ' '/certificate SHA-256 digest:/ {print $NF}' | tr -d ':' | tr '[:upper:]' '[:lower:]' | sort -u)
+          EXPECTED_SHA="27326144bdee8eefa9cd7a39e80c3a5322e8332419b86d4b13cfecbbe9eb7b73"
+          test "$CERT_SHA" = "$EXPECTED_SHA" || { echo "Certificate SHA-256 mismatch: got '$CERT_SHA'" >&2; exit 1; }
+
+          BADGING=$(aapt dump badging "$apk_path")
+          printf '%s\n' "$BADGING" | sed -n '1p'
+          APP_ID=$(printf '%s\n' "$BADGING" | sed -n "1s/^package: name='\([^']*\)'.*/\1/p")
+          APK_VERSION_CODE=$(printf '%s\n' "$BADGING" | sed -n "1s/.*versionCode='\([^']*\)'.*/\1/p")
+          APK_VERSION_NAME=$(printf '%s\n' "$BADGING" | sed -n "1s/.*versionName='\([^']*\)'.*/\1/p")
+          test "$APP_ID" = 'me.rerere.rikkahub.arabic.dev' || { echo "Unexpected applicationId: $APP_ID" >&2; exit 1; }
+          test "$APK_VERSION_CODE" = "$EXPECTED_VERSION_CODE" || { echo "Unexpected versionCode: $APK_VERSION_CODE (expected $EXPECTED_VERSION_CODE)" >&2; exit 1; }
+          test "$APK_VERSION_NAME" = "$EXPECTED_VERSION_NAME" || { echo "Unexpected versionName: $APK_VERSION_NAME (expected $EXPECTED_VERSION_NAME)" >&2; exit 1; }
+          echo "APK verified: appId=$APP_ID version=$APK_VERSION_NAME code=$APK_VERSION_CODE cert=$CERT_SHA"
+
+      - name: Fetch previous Arabic APK for upgrade verification
+        if: steps.gate.outputs.do_build == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p previous-apk
+          gh release download v3.0.0.178 --repo "$TARGET_REPO" --pattern app-universal-release.apk --dir previous-apk
+
+      - name: Verify signed in-place upgrade and launch
+        if: steps.gate.outputs.do_build == 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: bash .github/scripts/verify-apk-upgrade.sh
+
+      # A clean candidate that fails validation is terminally blocked by a separate
+      # state-only commit based on freshly fetched origin/master; never push this run's HEAD.
+      - name: 'P3) Record validation failure (state only)'
+        if: failure() && steps.merge.outputs.merged_upstream == 'true' && steps.gate.outputs.do_build == 'true' && steps.plan.outputs.mode == 'auto' && github.ref == 'refs/heads/master'
+        env:
+          MODE: ${{ steps.plan.outputs.mode }}
+          WORKFLOW_REF: ${{ github.ref }}
+          JOB_STATUS: ${{ job.status }}
+          MERGED_UPSTREAM: ${{ steps.merge.outputs.merged_upstream }}
+          DO_BUILD: ${{ steps.gate.outputs.do_build }}
+          UPSTREAM_SHA: ${{ steps.fetch_upstream.outputs.upstream_sha }}
+        run: |
+          set -euo pipefail
+          # Refuse out-of-scope invocations before fetching, creating a worktree, or writing.
+          test "$MODE" = auto
+          test "$WORKFLOW_REF" = refs/heads/master
+          test "$JOB_STATUS" = failure
+          test "$MERGED_UPSTREAM" = true
+          test "$DO_BUILD" = true
+          [[ "$UPSTREAM_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          git fetch origin master:refs/remotes/origin/master
+          MASTER_SHA=$(git rev-parse refs/remotes/origin/master)
+          if git merge-base --is-ancestor "$UPSTREAM_SHA" "$MASTER_SHA"; then
+            echo "Upstream is already contained in origin/master; no stale blocked state was written."
+            exit 0
+          fi
+
+          WORKTREE_ROOT=$(mktemp -d "${RUNNER_TEMP:-/tmp}/sync-validation-state.XXXXXX")
+          STATE_WT="$WORKTREE_ROOT/state"
+          cleanup() {
+            git worktree remove "$STATE_WT" >/dev/null 2>&1 || true
+            rmdir "$WORKTREE_ROOT" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          git worktree add --detach "$STATE_WT" "$MASTER_SHA"
+          mkdir -p "$STATE_WT/$(dirname "$STATE_FILE")"
+          python3 - "$STATE_WT/$STATE_FILE" "$UPSTREAM_SHA" <<'PY'
+          import datetime, json, sys
+          path, sha = sys.argv[1:]
+          try:
+              with open(path) as f:
+                  state = json.load(f)
+          except (FileNotFoundError, json.JSONDecodeError):
+              state = {}
+          state["blockedUpstream"] = sha
+          state["blockedStage"] = "validation"
+          state["blockedFiles"] = []
+          state["reason"] = "Validation failed after a clean upstream merge and requested build."
+          state["blockedAt"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+          with open(path, "w") as f:
+              json.dump(state, f, indent=2, sort_keys=True)
+              f.write("\n")
+          PY
+          git -C "$STATE_WT" add -- "$STATE_FILE"
+          STAGED=$(git -C "$STATE_WT" diff --cached --name-only)
+          test "$STAGED" = "$STATE_FILE"
+          if ! git -C "$STATE_WT" diff --cached --quiet; then
+            git -C "$STATE_WT" commit -m "chore(sync): block validation-failed upstream $(git rev-parse --short "$UPSTREAM_SHA") [skip ci]"
+            test "$MODE" = auto && test "$WORKFLOW_REF" = refs/heads/master && test "$JOB_STATUS" = failure
+            git -C "$STATE_WT" push origin HEAD:master
+          fi
+
+      # ---- M. Push the validated merge (last, only after everything passed) -----------
+      - name: 'M) Push validated upstream merge'
+        if: success() && steps.gate.outputs.do_build == 'true' && steps.merge.outputs.merged_upstream == 'true' && steps.plan.outputs.mode == 'auto' && github.ref == 'refs/heads/master'
+        env:
+          MODE: ${{ steps.plan.outputs.mode }}
+          WORKFLOW_REF: ${{ github.ref }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          test "$MODE" = auto
+          test "$WORKFLOW_REF" = refs/heads/master
+          test "$JOB_STATUS" = success
+          git push origin HEAD:master
+
+      # ---- N. Publish release ---------------------------------------------------------
+      - name: 'N) Publish GitHub Release'
+        id: publish_release
+        if: steps.gate.outputs.do_build == 'true' && steps.gate.outputs.publish_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ steps.version_step.outputs.release_version }}
+        run: |
+          set -euo pipefail
+          TAG_NAME="v${RELEASE_VERSION}"
+          RELEASE_TITLE="RikkaHub Arabic ${TAG_NAME}"
+          EXISTING_TAGS=$(git ls-remote --tags origin "refs/tags/$TAG_NAME")
+          if [ -n "$EXISTING_TAGS" ]; then
+            echo "::error::Refusing to reuse existing tag $TAG_NAME"
+            exit 1
+          fi
+          cat > /tmp/release-notes.md <<EOF
+          ### RikkaHub Arabic ${TAG_NAME}
+
+          تحديث رسمي لنسخة RikkaHub Arabic المستقلة.
+
+          - **Application ID:** \`me.rerere.rikkahub.arabic.dev\`
+          - **Official RikkaHub base:** \`${{ steps.upstream_check.outputs.upstream_short }}\`
+          - **التوقيع الرقمي:** Keystore دائم (SHA-256: \`27:32:61:44:BD:EE:8E:EF:A9:CD:7A:39:E8:0C:3A:53:22:E8:33:24:19:B8:6D:4B:13:CF:EC:BB:E9:EB:7B:73\`)
+          - **التوافق:** تثبيت مباشر وتحديث فوق النسخة المثبتة حاليًا دون فقدان المحادثات أو الإعدادات.
+          - **المميزات:** دعم كامل للعربية وRTL واختيار لغة التطبيق.
+          EOF
+          echo "Publishing GitHub Release: $TAG_NAME to $TARGET_REPO"
+          gh release create "$TAG_NAME" \
+            --repo "$TARGET_REPO" \
+            --target "$(git rev-parse HEAD)" \
+            --title "$RELEASE_TITLE" \
+            --notes-file /tmp/release-notes.md \
+            app/build/outputs/apk/release/app-universal-release.apk
+
+      # ---- O. Explicit outcome: distinguish built/staged from actually released --------
+      - name: 'O) Outcome'
+        if: always()
+        run: |
+          STATUS="${{ job.status }}"
+          BLOCKED="${{ steps.merge.outputs.blocked }}"
+          MERGED="${{ steps.merge.outputs.merged_upstream }}"
+          DO_BUILD="${{ steps.gate.outputs.do_build }}"
+          DO_PUBLISH="${{ steps.gate.outputs.publish_release }}"
+          BUILD_OUTCOME="${{ steps.build_apk.outcome }}"
+          APK_UPLOAD_OUTCOME="${{ steps.upload_apk.outcome }}"
+          RELEASE_OUTCOME="${{ steps.publish_release.outcome }}"
+          APK_EXISTS="false"
+          if [ -s app/build/outputs/apk/release/app-universal-release.apk ]; then
+            APK_EXISTS="true"
+          fi
+          if [ "$STATUS" != "success" ]; then
+            echo "::error::Pipeline FAILED ($STATUS). Build outcome=$BUILD_OUTCOME; APK file present=$APK_EXISTS; artifact upload=$APK_UPLOAD_OUTCOME; release step=$RELEASE_OUTCOME."
+            echo "❌ Pipeline failed ($STATUS). Build step=$BUILD_OUTCOME; APK file present=$APK_EXISTS; APK artifact upload=$APK_UPLOAD_OUTCOME; release step=$RELEASE_OUTCOME. No claim is made that the APK was not built." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$BLOCKED" = "true" ]; then
+            echo "::warning::Upstream sync BLOCKED by conflicts — master unchanged. See the 'Attempt upstream merge' report."
+            echo "⛔ **Sync blocked (needs human review).** master unchanged." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "$DO_BUILD" = "true" ] && [ "$DO_PUBLISH" = "true" ] && [ "$RELEASE_OUTCOME" = "success" ]; then
+            echo "✅ **Arabic APK built and released.**" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$DO_BUILD" = "true" ]; then
+            echo "✅ **Arabic APK built and staged as a workflow artifact; not released publicly.**" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ℹ️ **Nothing to do** — no new upstream and no build requested." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload test and lint reports (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-test-lint-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            upgrade-verification/
+            **/build/test-results/
+            app/build/reports/tests/
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
+            app/build/reports/lint-results-release.html
+            app/build/reports/lint-results-release.xml
+          if-no-files-found: ignore
+
+      - name: Remove release-only files
+        if: always()
+        run: rm -f arabic-release.keystore local.properties
