@@ -343,7 +343,7 @@ def main() -> int:
         if root.returncode and "already running as root" not in (root.stdout + root.stderr).lower():
             raise RuntimeError("adb root غير متاح؛ لا يمكن سحب SQLite من بيانات التطبيق بأمان")
         wait_adb(args.serial)
-        uid_info = adb(args.serial, "shell", "su", "0", "sh", "-c", f"stat -c '%u %g %a' /data/user/0/{args.package}/{STORE_REL}", check=False)
+        uid_info = adb(args.serial, "shell", f"stat -c '%u %g %a' /data/user/0/{args.package}/{STORE_REL}", check=False)
         if uid_info.returncode:
             raise RuntimeError("ملف DataStore غير موجود بعد تشغيل مرحلة الترقية؛ يجب أن يكون التطبيق قد أُطلق مرة واحدة")
         uid_gid_mode = uid_info.stdout.strip().split()
@@ -359,8 +359,7 @@ def main() -> int:
         temp_remote = "/data/local/tmp/rikka-settings-mock.preferences_pb"
         adb(args.serial, "push", str(out / "settings-configured-mock.preferences_pb"), temp_remote)
         data_path = f"/data/user/0/{args.package}/{STORE_REL}"
-        adb(args.serial, "shell", "su", "0", "sh", "-c",
-            f"cp {temp_remote} {data_path} && chown {uid_gid_mode[0]}:{uid_gid_mode[1]} {data_path} && chmod {uid_gid_mode[2]} {data_path}")
+        adb(args.serial, "shell", f"cp {temp_remote} {data_path} && chown {uid_gid_mode[0]}:{uid_gid_mode[1]} {data_path} && chmod {uid_gid_mode[2]} {data_path}")
         result["datastore"] = config_evidence
         result["datastore_snapshot_before"] = str(out / "settings-before-send.preferences_pb")
         result["datastore_snapshot_mock"] = str(out / "settings-configured-mock.preferences_pb")
