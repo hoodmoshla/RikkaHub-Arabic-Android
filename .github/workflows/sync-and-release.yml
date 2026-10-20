@@ -38,6 +38,15 @@ jobs:
           git diff --exit-code "$CANDIDATE_SHA" HEAD -- . ':!.github/workflows/sync-and-release.yml' ':!.github/scripts/verify-upgrade186.sh' ':!.github/scripts/upgrade186-data.py' ':!.github/scripts/send-after-upgrade.py'
           git rev-parse HEAD > upgrade-verification/metadata/test-sha.txt
           echo "$CANDIDATE_SHA" > upgrade-verification/metadata/candidate-sha.txt
+          printf 'ANDROID_HOME=%s\n' "$ANDROID_HOME" | tee upgrade-verification/metadata/runner-sdk.txt
+          ls -la "$ANDROID_HOME" >> upgrade-verification/metadata/runner-sdk.txt
+          command -v emulator >> upgrade-verification/metadata/runner-sdk.txt || true
+          test -e /dev/kvm
+          sudo chmod 666 /dev/kvm
+          if [ ! -x "$ANDROID_HOME/emulator/emulator" ]; then
+            echo 'Installed runner SDK has no emulator executable; installing official SDK emulator component.' | tee -a upgrade-verification/metadata/runner-sdk.txt
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator
+          fi
           test -x "$ANDROID_HOME/emulator/emulator"
           "$ANDROID_HOME/emulator/emulator" -version | tee upgrade-verification/metadata/runner-emulator-version.txt
           test -e /dev/kvm
