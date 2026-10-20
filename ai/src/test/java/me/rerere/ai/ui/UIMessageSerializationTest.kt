@@ -1,11 +1,13 @@
 package me.rerere.ai.ui
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
 class UIMessageSerializationTest {
@@ -58,5 +60,31 @@ class UIMessageSerializationTest {
         val legacy = """{"role":"assistant","parts":[],"modelId":"00000000-0000-0000-0000-000000000001"}"""
 
         assertNull(Json.decodeFromString<UIMessage>(legacy).snapshotModel())
+    }
+
+    @Test
+    fun `legacy tool without timestamps decodes with null timestamps`() {
+        val legacy = """{"type":"tool","toolCallId":"call-1","toolName":"search","input":"{}"}"""
+
+        val decoded = Json.decodeFromString<UIMessagePart>(legacy) as UIMessagePart.Tool
+
+        assertNull(decoded.startedAt)
+        assertNull(decoded.finishedAt)
+    }
+
+    @Test
+    fun `tool timestamps survive serialization`() {
+        val tool = UIMessagePart.Tool(
+            toolCallId = "call-1",
+            toolName = "search",
+            input = "{}",
+            startedAt = Instant.parse("2024-01-02T03:04:05Z"),
+            finishedAt = Instant.parse("2024-01-02T03:04:06Z"),
+        )
+
+        val restored = Json.decodeFromString<UIMessagePart>(Json.encodeToString(tool)) as UIMessagePart.Tool
+
+        assertEquals(tool.startedAt, restored.startedAt)
+        assertEquals(tool.finishedAt, restored.finishedAt)
     }
 }
