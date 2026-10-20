@@ -6,11 +6,11 @@ concurrency:
   cancel-in-progress: false
 jobs:
   signed-upgrade186:
-    if: github.ref == 'refs/heads/finish/upstream-5203601f' && inputs.publish_release == false && inputs.mode == 'build-only'
+    if: github.ref == 'refs/heads/test/final-193-delta' && inputs.publish_release == false && inputs.mode == 'build-only'
     runs-on: ubuntu-latest
     timeout-minutes: 65
     env:
-      CANDIDATE_SHA: 90cbec3e3d68ba1fcdb7187ce231d7e8390935cd
+      CANDIDATE_SHA: 09f2befcd020408c8c801ed83a704e24231e47f7
       EXPECTED_CERT: 27326144bdee8eefa9cd7a39e80c3a5322e8332419b86d4b13cfecbbe9eb7b73
     steps:
     - name: Checkout temporary test branch
@@ -99,7 +99,7 @@ jobs:
 
         '
     - name: Targeted new agent and tool serialization tests
-      run: ./gradlew :ai:test --tests "me.rerere.ai.agent.AgentLoopTest" --tests "me.rerere.ai.ui.UIMessagePartTest" --tests "me.rerere.ai.ui.UIMessageSerializationTest"
+      run: ./gradlew :ai:testDebugUnitTest --tests "me.rerere.ai.agent.AgentLoopTest" --tests "me.rerere.ai.ui.UIMessagePartTest" --tests "me.rerere.ai.ui.UIMessageSerializationTest"
         --tests "me.rerere.ai.ui.MessageToolMigrationTest" --no-daemon
     - name: Targeted conversation tool cancellation and persistence tests
       run: ./gradlew :app:testDebugUnitTest --tests "me.rerere.rikkahub.data.model.ConversationMessagesTest" --tests "me.rerere.rikkahub.data.model.ConversationToolCallsTest"
@@ -177,7 +177,7 @@ jobs:
     - name: Summarize actual result only
       if: always()
       shell: bash
-      run: "{\n  echo '## Temporary signed upgrade186 test: no publication'\n  echo 'Candidate production source: 90cbec3e3d68ba1fcdb7187ce231d7e8390935cd'\n\
+      run: "{\n  echo '## Temporary signed upgrade186 test: no publication'\n  echo 'Candidate production source: 09f2befcd020408c8c801ed83a704e24231e47f7'\n\
         \  echo 'Send test uses local mock OpenAI endpoint, not external AI service.'\n  echo 'No release, merge, or Git push step exists; verified APK\
         \ staged for authorized release.'\n  find upgrade-verification \\( -name '*result*.json' -o -name result.txt \\) | while read -r f; do echo \"###\
         \ $f\"; cat \"$f\"; done\n} >> \"$GITHUB_STEP_SUMMARY\"\n"
