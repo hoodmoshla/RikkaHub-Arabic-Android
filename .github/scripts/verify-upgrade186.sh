@@ -66,6 +66,16 @@ adb wait-for-device
 ROOT_UID="$(adb shell id -u | tr -d '\r')"
 [[ "$ROOT_UID" == 0 ]] || fail "emulator root check failed (uid=$ROOT_UID)"
 printf 'sdk=%s\nabi=%s\nroot_uid=%s\n' "$SDK" "$ABI" "$ROOT_UID" > "$EVIDENCE/emulator.txt"
+adb shell mkdir -p /data/local/tmp/rikka-native
+adb push "$ROOT/upgrade-native/." /data/local/tmp/rikka-native/ > "$EVIDENCE/push-native-checker.txt"
+adb shell chmod 755 /data/local/tmp/rikka-native/android-db-check
+native_snapshot() {
+  local label="$1" libphase="$2"
+  local remote="/data/local/tmp/rikka-native"
+  adb shell mkdir -p "$remote/state"
+  adb push "$WORK/$label" "$remote/state/" > "$EVIDENCE/push-native-state-$label.txt"
+  adb shell "LD_LIBRARY_PATH=$remote/$libphase $remote/android-db-check $remote/$libphase/libsqlite3x.so $remote/$libphase/libsimple.so $remote/state/$label/$DB_NAME" > "$EVIDENCE/native-$label.json"
+}
 
 # Never overwrite an installed app or pre-existing data: the upgrade must start fresh.
 if [[ -n "$(adb shell pm path "$PACKAGE" 2>/dev/null | tr -d '\r')" ]]; then
@@ -80,7 +90,11 @@ grep -Eq "versionCode=${EXPECTED_OLD_CODE}([[:space:]]|$)" "$EVIDENCE/package-pr
 launch_capture() {
   local phase="$1"
   adb logcat -c
-  adb shell am start -W -n "$ACTIVITY" | tee "$EVIDENCE/launch-$phase.txt"
+  if [[ "$phase" == previous-seeded || "$phase" == update ]]; then
+    adb shell am start -W -n "$ACTIVITY" --es conversationId f9fba7c0-cc8d-4e40-bac7-0a18ef4d7131 | tee "$EVIDENCE/launch-$phase.txt"
+  else
+    adb shell am start -W -n "$ACTIVITY" | tee "$EVIDENCE/launch-$phase.txt"
+  fi
   grep -q 'Status: ok' "$EVIDENCE/launch-$phase.txt" || fail "$phase launch failed"
   sleep 12
   adb shell pidof "$PACKAGE" > "$EVIDENCE/pid-$phase.txt" || true
@@ -130,9 +144,10 @@ launch_capture previous-seeded
 adb exec-out screencap -p > "$EVIDENCE/screenshot-before.png"
 adb shell am force-stop "$PACKAGE"
 pull_state before-upgrade
+native_snapshot before-upgrade stable
 python3 "$DATA_HELPER" --helper "$HELPER" snapshot "$WORK/before-upgrade/$DB_NAME" \
   "$WORK/before-upgrade/settings.preferences_pb" previous-release \
-  "$EVIDENCE/before-upgrade.json" --expected-version 31 \
+  "$EVIDENCE/before-upgrade.json" --expected-version 31 --native-snapshot "$EVIDENCE/native-before-upgrade.json" \
   | tee "$EVIDENCE/before-upgrade-query.txt"
 
 # The sole app replacement operation. Deliberately no uninstall, clear-data, or data removal.
@@ -149,9 +164,10 @@ UPDATED_UID="$(adb shell stat -c %u "$DB" | tr -d '\r')"
 [[ "$UPDATED_UID" == "$APP_UID" ]] || fail "package/data UID changed across replacement ($APP_UID -> $UPDATED_UID)"
 printf 'previous_app_uid=%s\nupdated_app_uid=%s\n' "$APP_UID" "$UPDATED_UID" > "$EVIDENCE/uid-comparison.txt"
 pull_state after-upgrade
+native_snapshot after-upgrade candidate
 python3 "$DATA_HELPER" --helper "$HELPER" snapshot "$WORK/after-upgrade/$DB_NAME" \
   "$WORK/after-upgrade/settings.preferences_pb" candidate-release \
-  "$EVIDENCE/after-upgrade.json" --expected-version 32 \
+  "$EVIDENCE/after-upgrade.json" --expected-version 32 --native-snapshot "$EVIDENCE/native-after-upgrade.json" \
   | tee "$EVIDENCE/after-upgrade-query.txt"
 python3 "$DATA_HELPER" compare "$EVIDENCE/before-upgrade.json" "$EVIDENCE/after-upgrade.json" \
   | tee "$EVIDENCE/logical-comparison.txt"

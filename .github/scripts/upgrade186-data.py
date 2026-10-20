@@ -121,8 +121,21 @@ def run_seed(db_path: Path, prefs_path: Path, fixture) -> None:
     print("Seeded the imported original Arabic conversation/message fixture; dynamic_color=false and enable_suggestion=false.")
 
 
-def snapshot(db_path: Path, prefs_path: Path, phase: str, output: Path, expected_version: int, fixture) -> None:
-    db = db_snapshot(db_path, phase, expected_version)
+def snapshot(db_path: Path, prefs_path: Path, phase: str, output: Path, expected_version: int, fixture, native_snapshot: Path | None = None) -> None:
+    if native_snapshot is None:
+        db = db_snapshot(db_path, phase, expected_version)
+    else:
+        db = json.loads(native_snapshot.read_text())
+        if db.get("user_version") != expected_version:
+            raise ValueError(f"native SQLite user_version mismatch: {db.get('user_version')} != {expected_version}")
+        if db.get("integrity_check") != ["ok"] or db.get("foreign_key_check") != []:
+            raise ValueError("native APK SQLite integrity/foreign-key verification did not pass")
+        if not isinstance(db.get("tables"), dict) or "message_fts" not in db["tables"]:
+            raise ValueError("native snapshot must include the actual FTS table, not omit it")
+        for rows in db["tables"].values():
+            rows.sort(key=stable_json)
+        db["phase"] = phase
+        db["verifier"] = "Android CLI loading libsqlite3x.so and libsimple.so extracted from this phase's signed APK; read-only copied DB"
     settings = settings_snapshot(prefs_path, phase, fixture)
     # Keep the original helper's own strict semantic readback alongside a complete DB dump.
     logical = fixture.logical_snapshot(db_path, prefs_path, phase)
@@ -235,6 +248,7 @@ def main() -> None:
     snap_cmd.add_argument("phase")
     snap_cmd.add_argument("output", type=Path)
     snap_cmd.add_argument("--expected-version", type=int, choices=(31, 32), required=True)
+    snap_cmd.add_argument("--native-snapshot", type=Path)
     cmp_cmd = sub.add_parser("compare")
     cmp_cmd.add_argument("before", type=Path)
     cmp_cmd.add_argument("after", type=Path)
@@ -245,7 +259,7 @@ def main() -> None:
     elif args.command == "seed":
         run_seed(args.database, args.preferences, fixture)
     elif args.command == "snapshot":
-        snapshot(args.database, args.preferences, args.phase, args.output, args.expected_version, fixture)
+        snapshot(args.database, args.preferences, args.phase, args.output, args.expected_version, fixture, args.native_snapshot)
     elif args.command == "compare":
         compare(args.before, args.after)
 

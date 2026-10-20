@@ -35,7 +35,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p upgrade-verification/metadata
-          git diff --exit-code "$CANDIDATE_SHA" HEAD -- . ':!.github/workflows/sync-and-release.yml' ':!.github/scripts/verify-upgrade186.sh' ':!.github/scripts/upgrade186-data.py' ':!.github/scripts/send-after-upgrade.py'
+          git diff --exit-code "$CANDIDATE_SHA" HEAD -- . ':!.github/workflows/sync-and-release.yml' ':!.github/scripts/verify-upgrade186.sh' ':!.github/scripts/upgrade186-data.py' ':!.github/scripts/send-after-upgrade.py' ':!.github/scripts/android-db-check.c'
           git rev-parse HEAD > upgrade-verification/metadata/test-sha.txt
           echo "$CANDIDATE_SHA" > upgrade-verification/metadata/candidate-sha.txt
           printf 'ANDROID_HOME=%s\n' "$ANDROID_HOME" | tee upgrade-verification/metadata/runner-sdk.txt
@@ -111,6 +111,18 @@ jobs:
             sha256sum "$apk" >> upgrade-verification/metadata/apk-sha256.txt
           done
           rm -f arabic-release.keystore local.properties
+      - name: Build read-only Android verifier using exact APK native libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p upgrade-native/stable upgrade-native/candidate
+          NDK_CC=$(find "$ANDROID_HOME/ndk" -name x86_64-linux-android26-clang | sort -V | tail -1)
+          test -x "$NDK_CC"
+          "$NDK_CC" -std=c11 -O2 -Wall -Wextra .github/scripts/android-db-check.c -ldl -o upgrade-native/android-db-check
+          unzip -j previous-apk/app-universal-release.apk lib/x86_64/libsqlite3x.so lib/x86_64/libsimple.so -d upgrade-native/stable
+          unzip -j app/build/outputs/apk/release/app-universal-release.apk lib/x86_64/libsqlite3x.so lib/x86_64/libsimple.so -d upgrade-native/candidate
+          sha256sum upgrade-native/android-db-check upgrade-native/stable/*.so upgrade-native/candidate/*.so > upgrade-verification/metadata/native-library-sha256.txt
+          echo 'Exact native libraries extracted from each signed APK; Android verifier opens copied DB read-only; original app database is not modified.' > upgrade-verification/metadata/native-verifier.txt
       - name: Actual replacement upgrade then UI message send
         uses: reactivecircus/android-emulator-runner@v2
         with:
