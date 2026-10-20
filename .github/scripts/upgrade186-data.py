@@ -155,6 +155,99 @@ def snapshot(db_path: Path, prefs_path: Path, phase: str, output: Path, expected
     print(json.dumps({"phase": phase, "user_version": expected_version, "tables": len(db["tables"]), "settings": len(settings), "integrity": "ok", "foreign_key_violations": 0}, ensure_ascii=False))
 
 
+def protobuf_varint(data: bytes, pos: int) -> tuple[int, int]:
+    value = shift = 0
+    while pos < len(data) and shift < 70:
+        byte = data[pos]
+        pos += 1
+        value |= (byte & 127) << shift
+        if byte < 128:
+            return value, pos
+        shift += 7
+    raise ValueError("invalid DataStore varint")
+
+
+def value_int(raw_hex: str) -> int:
+    raw = bytes.fromhex(raw_hex)
+    if not raw or raw[0] != 24:
+        raise ValueError("expected AndroidX Value.integer field")
+    value, end = protobuf_varint(raw, 1)
+    if end != len(raw):
+        raise ValueError("extra fields in integer value")
+    return value
+
+
+def value_string(raw_hex: str) -> str:
+    raw = bytes.fromhex(raw_hex)
+    if not raw or raw[0] != 42:
+        raise ValueError("expected AndroidX Value.string field")
+    length, start = protobuf_varint(raw, 1)
+    if start + length != len(raw):
+        raise ValueError("invalid string value length")
+    return raw[start:].decode("utf-8")
+
+
+def quota_v5(provider: Any) -> Any:
+    # Exact semantic port of candidate PreferenceStoreV5Migration.kt (fb80c8b),
+    # not a blanket exclusion of providers. All unrelated provider/model/key values
+    # must remain equal; nested providerOverwrite follows the same source migration.
+    import copy
+    if not isinstance(provider, dict):
+        return provider
+    migrated = copy.deepcopy(provider)
+    balance = migrated.pop("balanceOption", None)
+    if isinstance(balance, dict) and provider.get("type") == "openai" and "quotaQuery" not in provider:
+        def primitive_string(value: Any, default: str) -> str:
+            if value is None or isinstance(value, (dict, list)):
+                return default
+            if isinstance(value, bool):
+                return "true" if value else "false"
+            return str(value)
+        path = primitive_string(balance.get("apiPath"), "/credits")
+        migrated["quotaQuery"] = {
+            "enabled": balance["enabled"] if isinstance(balance.get("enabled"), bool) else False,
+            "url": path if path.startswith("http") else "{{baseUrl}}" + path,
+            "headers": [{"name": "Authorization", "value": "Bearer {{apiKey}}"}],
+            "resultPath": primitive_string(balance.get("resultPath"), "data.total_usage"),
+        }
+    # ProviderSetting.Google/Claude serialize their newly introduced disabled
+    # QuotaQuery defaults on first load; preserve exact headers and every other field.
+    provider_type = provider.get("type")
+    if "quotaQuery" not in migrated and provider_type in ("google", "claude"):
+        migrated["quotaQuery"] = {
+            "enabled": False,
+            "url": "{{baseUrl}}/credits",
+            "headers": [{"name": "x-goog-api-key" if provider_type == "google" else "x-api-key", "value": "{{apiKey}}"}],
+            "resultPath": "data.total_usage",
+        }
+    if isinstance(provider.get("models"), list):
+        for model in migrated["models"]:
+            if isinstance(model, dict) and isinstance(model.get("providerOverwrite"), dict):
+                model["providerOverwrite"] = quota_v5(model["providerOverwrite"])
+    return migrated
+
+
+def compare_preferences(before: dict[str, str], after: dict[str, str]) -> list[str]:
+    if before.keys() != after.keys():
+        raise ValueError(f"DataStore keys changed: removed={sorted(before.keys()-after.keys())}, added={sorted(after.keys()-before.keys())}")
+    expected_changes = []
+    for key in before:
+        if key == "providers":
+            previous, current = json.loads(value_string(before[key])), json.loads(value_string(after[key]))
+            if not isinstance(previous, list) or current != [quota_v5(item) for item in previous]:
+                raise ValueError("provider settings differ beyond the exact documented quota-query migration")
+            if before[key] != after[key]:
+                expected_changes.append("providers: exact v5 quota migration plus disabled Google/Claude quota defaults; all other fields unchanged")
+        elif before[key] != after[key]:
+            if key == "data_version" and (value_int(before[key]), value_int(after[key])) == (4, 5):
+                expected_changes.append("data_version: 4 -> 5, as required by PreferenceStoreV5Migration")
+            elif key == "launch_count" and value_int(after[key]) == value_int(before[key]) + 1:
+                expected_changes.append("launch_count: exactly +1 for candidate first launch")
+            else:
+                raise ValueError(f"unexpected DataStore preference change: {key}")
+    return expected_changes
+
+
 def compare(before_path: Path, after_path: Path) -> None:
     before = json.loads(before_path.read_text(encoding="utf-8"))
     after = json.loads(after_path.read_text(encoding="utf-8"))
@@ -182,18 +275,15 @@ def compare(before_path: Path, after_path: Path) -> None:
     for payload in (before, after):
         if "room_master_table" in payload["database"]["tables"] and not payload["exceptions"].get("room_master_table"):
             raise ValueError("Room identity-table exception was not documented")
-    if before["settings_entries_value_hex"] != after["settings_entries_value_hex"]:
-        before_keys = set(before["settings_entries_value_hex"])
-        after_keys = set(after["settings_entries_value_hex"])
-        missing, added_settings = sorted(before_keys - after_keys), sorted(after_keys - before_keys)
-        changed = sorted(k for k in before_keys & after_keys if before["settings_entries_value_hex"][k] != after["settings_entries_value_hex"][k])
-        raise ValueError(f"DataStore preference entries differ: removed={missing}, added={added_settings}, changed={changed}")
+    expected_preference_changes = compare_preferences(before["settings_entries_value_hex"], after["settings_entries_value_hex"])
+    for description in expected_preference_changes:
+        print("Verified expected metadata/schema change: " + description)
     a, b = before["fixture_readback"], after["fixture_readback"]
     a.pop("phase", None)
     b.pop("phase", None)
     if a != b:
         raise ValueError("original Arabic fixture readback changed across upgrade")
-    print(f"PASS: all {len(old_app_tables)} schema-31 application tables' complete rows match; DataStore entries match; only usage_record was added (Room identity change documented).")
+    print(f"PASS: all {len(old_app_tables)} schema-31 application tables' complete rows match; all user preference values preserved with only explicitly verified v5 schema/launch metadata changes; only usage_record was added (Room identity change documented).")
 
 
 def self_test(fixture) -> None:
