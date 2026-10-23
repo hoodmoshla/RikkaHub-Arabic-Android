@@ -1,17 +1,21 @@
 {
   "_comment": "State for the Arabic upstream-sync workflow. Written only when an upstream merge is blocked by conflicts, so the 6-hourly schedule does not retry the same failing merge. Clearing 'blockedUpstream' (or running the workflow with force_sync=true) forces a new attempt.",
-  "blockedAt": "2026-10-22T16:37:34.587493+00:00",
+  "blockedAt": "2026-10-23T10:59:56.810756+00:00",
   "blockedFiles": [
     ".github/workflows/daily-build.yml",
     "app/.gitignore",
     "app/build.gradle.kts",
     "app/schemas/me.rerere.rikkahub.data.db.AppDatabase/32.json",
+    "app/src/main/java/me/rerere/rikkahub/RikkaHubApp.kt",
     "app/src/main/java/me/rerere/rikkahub/data/db/AppDatabase.kt",
     "app/src/main/java/me/rerere/rikkahub/data/db/dao/ConversationDAO.kt",
     "app/src/main/java/me/rerere/rikkahub/data/repository/ConversationRepository.kt",
     "app/src/main/java/me/rerere/rikkahub/ui/components/ai/WorkspaceSelectSheet.kt",
-    "app/src/main/keepRules/rikkahub.keep"
+    "app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingAboutPage.kt",
+    "app/src/main/keepRules/rikkahub.keep",
+    "app/src/main/res/values-ar/strings.xml",
+    "app/src/main/res/values/strings.xml"
   ],
-  "blockedUpstream": "43f1a5df24adc09b6720ae2e8aa568a12a5bf43a",
+  "blockedUpstream": "e48db7bc7b357b680a5c3d52408ad468eecd64b1",
   "lastReviewedUpstream": "5203601f79e61d63a56efb3d277d4e79e25bcc39"
 }
