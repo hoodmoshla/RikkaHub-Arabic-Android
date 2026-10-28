@@ -1,6 +1,6 @@
 {
   "_comment": "State for the Arabic upstream-sync workflow. Written only when an upstream merge is blocked by conflicts, so the 6-hourly schedule does not retry the same failing merge. Clearing 'blockedUpstream' (or running the workflow with force_sync=true) forces a new attempt.",
-  "blockedAt": "2026-10-27T17:27:59.346829+00:00",
+  "blockedAt": "2026-10-28T12:06:41.218809+00:00",
   "blockedFiles": [
     ".github/workflows/daily-build.yml",
     "app/.gitignore",
@@ -18,6 +18,6 @@
     "app/src/main/res/values/strings.xml",
     "gradle/libs.versions.toml"
   ],
-  "blockedUpstream": "a1c61c3cb1ee37b421c3592981b9b7335bba0320",
+  "blockedUpstream": "a046505a62edd876da4e5f5c77a01332c1649ae7",
   "lastReviewedUpstream": "5203601f79e61d63a56efb3d277d4e79e25bcc39"
 }
